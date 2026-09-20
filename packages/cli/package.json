@@ -1,0 +1,25 @@
+{
+  "name": "@bevara/cli",
+  "version": "1.0.0",
+  "description": "npm-like package manager for Bevara WebAssembly filters (accessors)",
+  "type": "module",
+  "bin": {
+    "bevara": "bin/bevara.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "templates"
+  ],
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "dependencies": {
+    "semver": "^7.6.0",
+    "tar": "^7.4.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

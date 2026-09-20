@@ -1,0 +1,19 @@
+{
+  "name": "bevara-filter-manager",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Bevara filter manager: the `bevara` CLI and the self-hosted filter registry",
+  "workspaces": [
+    "packages/cli",
+    "packages/registry"
+  ],
+  "scripts": {
+    "test": "npm test --workspaces",
+    "registry": "npm start -w @bevara/registry",
+    "e2e": "bash scripts/e2e.sh"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "type": "module"
+}

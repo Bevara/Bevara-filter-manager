@@ -1,0 +1,100 @@
+# Bevara filter registry — Deployment + PVC + Service.
+# Image is pushed to the cluster's local registry (see deploy/k8s/build.sh).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bevara-registry-data
+  labels:
+    app: bevara-registry
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bevara-registry
+  labels:
+    app: bevara-registry
+spec:
+  replicas: 1                      # SQLite + local files: keep a single replica
+  strategy:
+    type: Recreate                 # the PVC is RWO, avoid two pods holding it
+  selector:
+    matchLabels:
+      app: bevara-registry
+  template:
+    metadata:
+      labels:
+        app: bevara-registry
+    spec:
+      securityContext:
+        fsGroup: 1000              # "node" user in the image
+      containers:
+        - name: registry
+          image: 192.168.1.120:32000/bevara-registry:1.0.0
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: REGISTRY_NAME
+              value: "Bevara filter registry"
+            - name: PUBLIC_URL
+              value: https://registry.bevara.ddns.net
+            - name: DATA_DIR
+              value: /data
+            # Set to "false" once your users exist (or when OIDC is on) to close self-registration.
+            - name: ALLOW_SIGNUP
+              value: "true"
+            # Comma-separated usernames granted the admin role (advisories, any filter).
+            - name: ADMIN_USERS
+              value: "admin"
+            - name: MAX_TARBALL_BYTES
+              value: "268435456"
+          envFrom:
+            - secretRef:
+                name: bevara-registry-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /-/ping
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/ping
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: bevara-registry-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bevara-registry
+  labels:
+    app: bevara-registry
+spec:
+  type: ClusterIP
+  selector:
+    app: bevara-registry
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

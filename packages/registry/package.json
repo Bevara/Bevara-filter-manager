@@ -1,0 +1,19 @@
+{
+  "name": "@bevara/registry",
+  "version": "1.0.0",
+  "description": "Self-hosted registry for Bevara WebAssembly filters",
+  "type": "module",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "dependencies": {
+    "semver": "^7.6.0",
+    "tar": "^7.4.0"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "license": "MIT"
+}
