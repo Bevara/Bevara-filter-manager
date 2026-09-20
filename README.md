@@ -1,6 +1,6 @@
 # Bevara filter manager
 
-An npm-like package manager for **Bevara filters** — the WebAssembly accessors
+An package manager for **Bevara filters** 
 (decoders, demuxers, encoders…) that the Bevara solver links at run time to play
 formats a browser does not support natively.
 
