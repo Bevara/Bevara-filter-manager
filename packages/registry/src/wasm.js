@@ -110,8 +110,12 @@ function readDylink(r, end, name) {
   return d;
 }
 
-// Registry name for a compiled accessor: `<name>_<abi>.wasm`, matching what
-// the universal tags expect in their `with` attribute.
-export function accessorFileName(name, abi) {
-  return `${name}_${abi}.wasm`;
+// File name of a compiled accessor: `<module>_<abi>.wasm`, matching what the
+// universal tags expect in their `with` attribute. `module` defaults to the
+// package name without its namespace, and exists so that an accessor whose
+// file name is not all-lowercase (libOpenVVC_1.wasm) keeps a lowercase
+// package name (bevara:libopenvvc).
+export function accessorFileName(name, abi, module) {
+  const short = name.includes(':') ? name.slice(name.indexOf(':') + 1) : name;
+  return `${module || short}_${abi}.wasm`;
 }

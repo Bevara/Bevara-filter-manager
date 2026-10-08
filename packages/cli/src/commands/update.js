@@ -5,7 +5,7 @@ import { resolveTree, installResolved } from '../lib/resolve.js';
 
 export const options = { latest: { type: 'boolean', short: 'L' } };
 export const help = `Options:
-  -L, --latest   ignore the ranges in bevara.json and move to the latest published versions (rewrites bevara.json)
+  -L, --latest   ignore the ranges in the manifest and move to the latest published versions (rewrites them)
 Examples:
   bevara update            update all filters within their ranges
   bevara update theora     update one filter`;

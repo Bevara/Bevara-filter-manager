@@ -1,0 +1,88 @@
+{
+  // Ctrl/Cmd-Shift-P -> "Tasks: Run Task". The registry task is a background
+  // task: it stays running and VS Code considers it started once the server
+  // prints its "listening on" line.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "tests",
+      "type": "shell",
+      "command": "npm test",
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "tests (watch CLI)",
+      "type": "shell",
+      "command": "node --test --watch 'test/**/*.test.js'",
+      "options": { "cwd": "${workspaceFolder}/packages/cli" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e",
+      "type": "shell",
+      "command": "bash scripts/e2e.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "registry (localhost:8080)",
+      "type": "shell",
+      "command": "node packages/registry/src/server.js",
+      "options": {
+        "env": {
+          "PORT": "8080",
+          "DATA_DIR": "${workspaceFolder}/.vscode/debug-registry-data",
+          "PUBLIC_URL": "http://127.0.0.1:8080",
+          "BOOTSTRAP_ADMIN_USER": "admin",
+          "BOOTSTRAP_ADMIN_PASSWORD": "debugdebug"
+        }
+      },
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+        "background": { "activeOnStart": true, "beginsPattern": ".", "endsPattern": "listening on" }
+      }
+    },
+    {
+      "label": "registry: seed with the Showcase accessors",
+      "type": "shell",
+      "command": "node scripts/import-accessors.js --wasm-dir ${input:showcaseAccessors} --json-dir ${workspaceFolder}/../filters --namespace bevara",
+      "options": {
+        "env": {
+          "BEVARA_CONFIG": "${workspaceFolder}/.vscode/debug-bevararc",
+          "BEVARA_REGISTRY": "http://127.0.0.1:8080",
+          "BEVARA_PASSWORD": "debugdebug"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "registry: log in as the debug admin",
+      "type": "shell",
+      "command": "node packages/cli/bin/bevara.js login --password -u admin",
+      "options": {
+        "env": {
+          "BEVARA_CONFIG": "${workspaceFolder}/.vscode/debug-bevararc",
+          "BEVARA_REGISTRY": "http://127.0.0.1:8080",
+          "BEVARA_PASSWORD": "debugdebug"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "link bevara on the PATH (npm link)",
+      "type": "shell",
+      "command": "npm link -w @bevara/cli",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "showcaseAccessors",
+      "type": "promptString",
+      "description": "directory holding the built accessors (.wasm)",
+      "default": "${workspaceFolder}/../Showcase/accessors"
+    }
+  ]
+}

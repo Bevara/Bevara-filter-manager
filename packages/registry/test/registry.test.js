@@ -1,7 +1,11 @@
+import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { startRegistry, makeTarball, manifest, signup, publish, FIXTURE_WASM } from './helpers.js';
+import { startRegistry, makeTarball, manifest, signup, publish, keys, FIXTURE_WASM } from './helpers.js';
+import { generateKeyPair, verifyChain, verifyRecord, keyIdOf } from '../src/sig.js';
 
 describe('registry', () => {
   let reg, api, alice, bob;
@@ -32,9 +36,28 @@ describe('registry', () => {
     assert.equal((await api('POST', '/-/login', { body: { name: 'alice', password: 'nope' } })).status, 401);
   });
 
-  test('publish requires auth', async () => {
+  test('publish requires auth and a signature', async () => {
     const r = await api('PUT', '/filters/dummy/1.0.0', { body: await makeTarball(manifest()), headers: { 'content-type': 'application/gzip' } });
     assert.equal(r.status, 401);
+    const unsigned = await publish(api, alice, manifest(), { sign: false });
+    assert.equal(unsigned.status, 400);
+    assert.match(unsigned.data.error, /signed/);
+  });
+
+  test('publish rejects tampered records, foreign and unknown keys', async () => {
+    let r = await publish(api, alice, manifest(), { record: { wasmSha256: 'f'.repeat(64) } });
+    assert.equal(r.status, 400);
+    assert.match(r.data.error, /does not match the upload/);
+    r = await publish(api, alice, manifest(), { key: keys.get(bob) });           // bob's key, alice's token
+    assert.equal(r.status, 403);
+    r = await publish(api, alice, manifest(), { key: generateKeyPair() });        // never registered
+    assert.equal(r.status, 400);
+    assert.match(r.data.error, /unknown signing key/);
+    const k = keys.get(alice);
+    const bad = { ...k, privateKey: generateKeyPair().privateKey };               // right keyId, wrong private key
+    r = await publish(api, alice, manifest(), { key: bad });
+    assert.equal(r.status, 400);
+    assert.match(r.data.error, /invalid signature/);
   });
 
   test('publish rejects a non side-module wasm and a plain non-wasm', async () => {
@@ -60,13 +83,22 @@ describe('registry', () => {
   test('publish succeeds, packument and accessor endpoints work', async () => {
     const r = await publish(api, alice, manifest(), { extra: { 'README.md': '# dummy' } });
     assert.equal(r.status, 201, JSON.stringify(r.data));
+    assert.equal(r.data.name, 'bevara:dummy');
     assert.equal(r.data.dist.file, 'dummy_1.wasm');
+    assert.equal(r.data.signature.keyId, keys.get(alice).keyId);
+    assert.equal(r.data.signature.logSeq, 1);
+    assert.equal(r.data.checkpoint.seq, 1);
     const sha = createHash('sha256').update(FIXTURE_WASM).digest('base64');
     assert.equal(r.data.dist.integrity, `sha256-${sha}`);
 
     const p = await api('GET', '/filters/dummy');
     assert.equal(p.status, 200);
+    assert.equal(p.data.name, 'bevara:dummy');
+    assert.equal((await api('GET', '/filters/bevara%3Adummy')).data.name, 'bevara:dummy');
     assert.equal(p.data['dist-tags'].latest, '1.0.0');
+    const v = p.data.versions['1.0.0'];
+    assert.equal(verifyRecord(v.signature.record, v.signature.signature, v.signature.publicKey), true);
+    assert.equal(keyIdOf(v.signature.publicKey), v.signature.keyId);
     assert.deepEqual(p.data.owners, ['alice']);
     assert.equal(p.data.versions['1.0.0'].wasm.exports.includes('dummy_version'), true);
 
@@ -84,6 +116,10 @@ describe('registry', () => {
     assert.deepEqual(list.data.with, ['dummy']);
     const idx = await api('GET', '/accessors/index.json');
     assert.equal(idx.data.filters[0].file, 'dummy_1.wasm');
+    assert.equal(idx.data.filters[0].name, 'bevara:dummy');
+    assert.equal(idx.data.checkpoint.seq, 1);
+    assert.equal((await api('GET', '/accessors/bevara:dummy_1.wasm')).status, 200);
+    assert.equal((await api('GET', '/accessors/bevara%3Adummy/1.0.0/dummy_1.wasm')).status, 200);
 
     const tgz = await api('GET', '/filters/dummy/-/dummy-1.0.0.tgz');
     assert.equal(tgz.status, 200);
@@ -112,7 +148,8 @@ describe('registry', () => {
   test('search and filtering', async () => {
     await publish(api, alice, manifest({ name: 'other', description: 'Other audio thing', support: ['audio'], formats: ['Other'] }));
     assert.equal((await api('GET', '/filters')).data.total, 2);
-    assert.equal((await api('GET', '/filters?q=audio')).data.filters[0].name, 'other');
+    assert.equal((await api('GET', '/filters?namespace=bevara')).data.total, 2);
+    assert.equal((await api('GET', '/filters?q=audio')).data.filters[0].name, 'bevara:other');
     assert.equal((await api('GET', '/filters?support=video')).data.total, 1);
     assert.equal((await api('GET', '/filters?format=dummy')).data.total, 1);
   });
@@ -163,6 +200,96 @@ describe('registry', () => {
     assert.equal((await api('GET', '/-/whoami', { token: data.token })).status, 401);
   });
 
+  test('namespaces: users own their own, default namespace is reserved, first publisher claims a new one', async () => {
+    let r = await publish(api, bob, manifest({ name: 'bobthing' }));
+    assert.equal(r.status, 403);                     // bob is not an admin: cannot create in "bevara:"
+    assert.match(r.data.error, /bob:bobthing/);
+    r = await publish(api, bob, manifest({ name: 'bob:bobthing' }));
+    assert.equal(r.status, 201);
+    assert.equal(r.data.name, 'bob:bobthing');
+    r = await publish(api, bob, manifest({ name: 'acme:tool' }));
+    assert.equal(r.status, 201);                     // new namespace claimed by bob
+    r = await publish(api, alice, manifest({ name: 'acme:tool2' }));
+    assert.equal(r.status, 201);                     // alice is admin
+    const ns = await api('GET', '/-/namespaces');
+    const acme = ns.data.namespaces.find((n) => n.name === 'acme');
+    assert.deepEqual(acme.owners, ['bob']);
+    assert.equal((await api('PUT', '/-/namespaces/acme/owners/alice', { token: bob })).status, 200);
+    assert.equal((await api('GET', '/-/whoami', { token: bob })).data.namespaces.includes('acme'), true);
+    // The namespaced URL form still serves what is published there.
+    assert.equal((await api('GET', '/accessors/bob:bobthing_1.wasm')).status, 200);
+  });
+
+  test('an accessor name belongs to one package, across namespaces, ABIs and letter case', async () => {
+    // bevara:dummy already provides dummy_1.wasm.
+    let r = await publish(api, bob, manifest({ name: 'bob:dummy' }));
+    assert.equal(r.status, 409);
+    assert.match(r.data.error, /accessor name "dummy" is already taken by bevara:dummy/);
+    assert.match(r.data.hint, /owner add/);
+    // Another ABI is still the same accessor name.
+    r = await publish(api, bob, manifest({ name: 'bob:dummy', abi: 2 }));
+    assert.equal(r.status, 409);
+    // Same name in another case, through "module".
+    r = await publish(api, bob, manifest({ name: 'bob:dummy', module: 'DUMMY' }));
+    assert.equal(r.status, 409);
+    // The refused upload left nothing behind.
+    assert.equal((await api('GET', '/filters/bob%3Adummy')).status, 404);
+    assert.ok(!fs.existsSync(path.join(reg.dataDir, 'store', 'bob:dummy')));
+    // The owner of the name can of course keep publishing it.
+    r = await publish(api, alice, manifest({ name: 'dummy', version: '1.0.9' }));
+    assert.equal(r.status, 201);
+    await api('DELETE', '/filters/dummy/1.0.9', { token: alice });
+  });
+
+  test('a GPAC filter registered by another package is reported', async () => {
+    const r = await publish(api, bob, manifest({ name: 'bob:otherdec', filters: ['dummydec'] }));
+    assert.equal(r.status, 201);
+    assert.ok(r.data.warnings.some((w) => /dummydec also registered by bevara:dummy/.test(w)), JSON.stringify(r.data.warnings));
+  });
+
+  test('transparency log: chain verifies, records are signed by the right keys, yank/deprecate are recorded', async () => {
+    const before = (await api('GET', '/-/log/checkpoint')).data;
+    assert.equal((await api('DELETE', '/filters/acme/tool2', { token: alice })).status, 404); // wrong path form
+    assert.equal((await api('DELETE', '/filters/acme%3Atool2', { token: alice })).status, 200);
+    const { entries, checkpoint } = (await api('GET', '/-/log?since=0')).data;
+    assert.equal(checkpoint.seq, before.seq + 1);
+    assert.equal(entries.at(-1).record.type, 'yank');
+    assert.equal(entries.at(-1).keyId, checkpoint.keyId);          // signed by the registry
+    const { keys: all } = (await api('GET', '/-/log/keys/all')).data;
+    const km = new Map(all.map((k) => [k.keyId, k.publicKey]));
+    const chain = verifyChain(entries, { resolveKey: (id) => km.get(id) });
+    assert.equal(chain.ok, true, chain.error);
+    assert.equal(chain.head, checkpoint.head);
+    assert.equal(chain.seq, checkpoint.seq);
+    const { signature, publicKey, ...body } = checkpoint;
+    assert.equal(verifyRecord(body, signature, publicKey), true);
+    // inclusion proof for entry 1 lets a client recompute the head
+    const proof = (await api('GET', '/-/log/1')).data;
+    assert.equal(proof.record.name, 'bevara:dummy');
+    let h = proof.hash;
+    const { entryHashFromDigest } = await import('../src/sig.js');
+    for (const p of proof.path) h = entryHashFromDigest(h, p.recordHash, p.signature);
+    assert.equal(h, checkpoint.head);
+    // a tampered entry breaks the chain
+    const forged = entries.map((e) => (e.seq === 2 ? { ...e, record: { ...e.record, version: '9.9.9' } } : e));
+    assert.equal(verifyChain(forged, { resolveKey: (id) => km.get(id) }).ok, false);
+  });
+
+  test('keys: revoke blocks publishing; audit exposes the signature', async () => {
+    const extra = generateKeyPair();
+    assert.equal((await api('PUT', '/-/keys', { token: bob, body: { publicKey: extra.publicKey } })).status, 201);
+    assert.equal((await api('PUT', '/-/keys', { token: alice, body: { publicKey: extra.publicKey } })).status, 409);
+    assert.equal((await api('DELETE', `/-/keys/${extra.keyId}`, { token: bob })).status, 200);
+    const r = await publish(api, bob, manifest({ name: 'bob:bobthing', version: '1.0.1' }), { key: extra });
+    assert.equal(r.status, 403);
+    assert.match(r.data.error, /revoked/);
+    assert.equal((await api('PUT', '/-/keys', { token: alice, body: { publicKey: 'AAAA' } })).status, 400);
+    const audit = await api('POST', '/-/audit', { body: { filters: { dummy: '1.0.0' } } });
+    assert.equal(audit.data.report.dummy.name, 'bevara:dummy');
+    assert.equal(audit.data.report.dummy.version.signature.keyId, keys.get(alice).keyId);
+    assert.ok(audit.data.checkpoint.seq > 0);
+  });
+
   test('unpublish version then whole filter', async () => {
     assert.equal((await api('DELETE', '/filters/dummy/1.1.0', { token: bob })).status, 200);
     assert.equal((await api('GET', '/filters/dummy')).data['dist-tags'].latest, '1.0.0');
@@ -172,10 +299,59 @@ describe('registry', () => {
     assert.equal((await api('GET', '/accessors/other_1.wasm')).status, 404);
   });
 
+  test('an upload over the limit gets a 413 the client can read, not a dropped connection', async () => {
+    const small = await startRegistry({ maxTarball: 64 });
+    try {
+      const token = await signup(small.api, 'dave');
+      const r = await publish(small.api, token, manifest({ name: 'dave:big' }));
+      assert.equal(r.status, 413);
+      assert.match(r.data.error, /limit/);
+    } finally { await small.close(); }
+  });
+
   test('catalog UI is served', async () => {
     const r = await api('GET', '/');
     assert.equal(r.status, 200);
     assert.match(r.data, /Bevara filter registry/);
+  });
+});
+
+describe('registry opened on an older database', () => {
+  test('accessor names are reserved from what is published, and existing clashes are reported', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-migrate-'));
+    const dbFile = path.join(dataDir, 'registry.sqlite');
+    const logs = [];
+    let reg = await startRegistry({ dataDir, dbFile, log: (m) => logs.push(m) });
+    const t = await signup(reg.api, 'erin');
+    assert.equal((await publish(reg.api, t, manifest({ name: 'erin:clash' }))).status, 201);
+    // Simulate a database from before the reservation table: drop the
+    // reservations and add a second package providing the same accessor.
+    reg.app.db.exec("DELETE FROM accessor_names");
+    reg.app.db.exec("INSERT INTO namespaces (name) VALUES ('frank')");
+    reg.app.db.exec("INSERT INTO filters (name, description, latest) VALUES ('frank:clash', 'x', '1.0.0')");
+    reg.app.db.exec("INSERT INTO versions (name, version, abi, manifest, wasm_file, wasm_sha256, wasm_size, tarball_sha256, tarball_size) VALUES ('frank:clash', '1.0.0', 1, '{}', 'clash_1.wasm', 'x', 1, 'x', 1)");
+    await new Promise((r) => reg.app.server.close(r)); reg.app.db.close();
+
+    reg = await startRegistry({ dataDir, dbFile, log: (m) => logs.push(m) });
+    try {
+      assert.ok(logs.some((m) => /accessor name already used by two packages \(clash: erin:clash and frank:clash\)/.test(m)), logs.join('\n'));
+      // The first publisher keeps the name: a new version of the other is refused.
+      const holder = reg.app.db.prepare("SELECT name FROM accessor_names WHERE key = 'clash'").get().name;
+      assert.equal(holder, 'erin:clash');
+    } finally { await reg.close(); }
+  });
+});
+
+describe('registry with optional signatures', () => {
+  test('unsigned publish is accepted and flagged', async () => {
+    const reg = await startRegistry({ requireSignatures: false });
+    try {
+      const t = await signup(reg.api, 'carol');
+      const r = await publish(reg.api, t, manifest({ name: 'carol:x' }), { sign: false });
+      assert.equal(r.status, 201);
+      assert.equal(r.data.signature, null);
+      assert.equal((await reg.api('GET', '/-/log/checkpoint')).data.seq, 0);
+    } finally { await reg.close(); }
   });
 });
 
@@ -188,6 +364,25 @@ describe('registry with signup disabled and bootstrap admin', () => {
       reg.app.auth.createUser({ name: 'root', password: 'password123' });
       assert.equal(reg.app.auth.getUser('someone').role, 'admin'); // first user
       assert.equal(reg.app.auth.getUser('root').role, 'admin');    // listed admin
+    } finally { await reg.close(); }
+  });
+});
+
+describe('deployment', () => {
+  // The deployed registry once lagged behind the code because the image tag was
+  // never bumped. The tag must be the package version, which /-/ping reports.
+  test('the image tag in deploy/k8s/registry.yaml is the package version', () => {
+    const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    const yaml = fs.readFileSync(new URL('../../../deploy/k8s/registry.yaml', import.meta.url), 'utf8');
+    const tag = /image:\s*\S+\/bevara-registry:(\S+)/.exec(yaml)?.[1];
+    assert.equal(tag, pkg.version, `bump the image tag to ${pkg.version} in deploy/k8s/registry.yaml (and SDK/registry/registry.yaml)`);
+  });
+
+  test('/-/ping reports the package version', async () => {
+    const reg = await startRegistry();
+    try {
+      const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+      assert.equal((await reg.api('GET', '/-/ping')).data.version, pkg.version);
     } finally { await reg.close(); }
   });
 });

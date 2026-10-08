@@ -34,7 +34,7 @@ spec:
         fsGroup: 1000              # "node" user in the image
       containers:
         - name: registry
-          image: 192.168.1.120:32000/bevara-registry:1.0.0
+          image: 192.168.1.120:32000/bevara-registry:1.2.0
           imagePullPolicy: Always
           ports:
             - name: http
@@ -54,6 +54,13 @@ spec:
               value: "admin"
             - name: MAX_TARBALL_BYTES
               value: "268435456"
+            # Namespace used for bare names ("theora" -> "bevara:theora"); only admins create packages in it.
+            - name: DEFAULT_NAMESPACE
+              value: bevara
+            # Every publish must carry an Ed25519 signature that is appended to the transparency log.
+            # The registry's own log-signing key is created at first start in /data/registry-key.json.
+            - name: REQUIRE_SIGNATURES
+              value: "true"
           envFrom:
             - secretRef:
                 name: bevara-registry-secrets

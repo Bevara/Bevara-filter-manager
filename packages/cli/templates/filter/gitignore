@@ -1,3 +1,4 @@
+.bevara/
 build/
 *.tgz
 .DS_Store

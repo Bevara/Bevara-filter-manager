@@ -4,7 +4,8 @@
 // when available.
 //
 //   node scripts/import-accessors.js --wasm-dir ../Showcase/accessors --json-dir ../filters \
-//        --registry http://localhost:8080 [--version 1.0.0] [--only theora,ogg] [--dry-run]
+//        --registry http://localhost:8080 [--namespace bevara] [--version 1.0.0] [--only theora,ogg] [--dry-run]
+// Publishes are signed with the CLI's key (generated on first use).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 const { values: o } = parseArgs({ options: {
   'wasm-dir': { type: 'string' }, 'json-dir': { type: 'string' }, registry: { type: 'string' },
   version: { type: 'string', default: '1.0.0' }, only: { type: 'string' }, 'dry-run': { type: 'boolean' }, license: { type: 'string', default: 'LGPL-2.1-or-later' },
+  namespace: { type: 'string' },   // e.g. "bevara" (default namespace, admins only) or your username
 } });
 if (!o['wasm-dir']) { console.error('usage: import-accessors.js --wasm-dir <dir> [--json-dir <filters repo>] [--registry <url>]'); process.exit(2); }
 
@@ -32,13 +34,15 @@ function findJson(name) {
 
 let ok = 0, failed = 0;
 for (const file of fs.readdirSync(o['wasm-dir']).sort()) {
-  const m = /^([a-z0-9][a-z0-9._-]*)_(\d+)\.wasm$/i.exec(file);
+  const m = /^([A-Za-z0-9][A-Za-z0-9._-]*)_(\d+)\.wasm$/.exec(file);
   if (!m) continue;
-  const name = m[1].toLowerCase(), abi = parseInt(m[2], 10);
-  if (only && !only.has(name)) continue;
+  // Package names are lowercase; the .wasm keeps its own case (libOpenVVC_1.wasm).
+  const moduleName = m[1], name = moduleName.toLowerCase(), abi = parseInt(m[2], 10);
+  if (only && !only.has(name) && !only.has(moduleName)) continue;
   const src = findJson(name) ?? {};
   const manifest = {
-    name, version: o.version, abi,
+    name: o.namespace ? `${o.namespace}:${name}` : name, version: o.version, abi,
+    ...(moduleName !== name ? { module: moduleName } : {}),
     description: src.description ?? `${name} accessor`,
     help: src.help,
     filters: src.filters ?? [name],

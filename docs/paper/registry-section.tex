@@ -1,0 +1,303 @@
+% ---------------------------------------------------------------------------
+% Section draft for The Web Conference (WWW) 2027 — ACM sigconf, double-blind.
+% Companion to the MMSys 2027 paper "Enabling Browser Support of Arbitrary
+% Multimedia via Dynamic WebAssembly-Based Pipelines". Numbers come from
+% scripts/bench.js in the bevara-filter-manager repository (see the README
+% in this directory to reproduce them).
+%
+% Before submission: check the anonymisation policy for the tool name
+% (\toolname) and repository URLs, and re-run the benchmark on the
+% evaluation machine so the figures match Table~\ref{tab:reg-publish}.
+% ---------------------------------------------------------------------------
+\newcommand{\toolname}{\texttt{bevara}}
+\newcommand{\registry}{registry}
+
+\section{Supplying Accessors through a Capability-Indexed, Verifiable Registry}
+\label{sec:registry}
+
+The pipeline mechanism of the previous sections deliberately knows nothing at
+compile time about the accessors it will link: the set of decoders available
+to a page is a property of the page (\texttt{with} attribute), of the site
+(library policy of the \texttt{MutationObserver} and Service Worker modes), or
+of the content itself (ISOBMFF encapsulation). All three supply policies
+therefore assume that somebody \emph{curates} a collection of independently
+compiled side modules, and the on-demand resolution of
+Section~\ref{sec:ondemand} explicitly requires a mapping from a declared
+stream capability to a side-module name. In practice this collection is
+maintained by hand: a directory of \texttt{<name>\_<abi>.wasm} files copied
+from a build tree, with no record of who produced them, from which sources, or
+whether the copy in a page still matches what its author published. This
+section fills that gap with a package model and a registry designed around
+three properties that general-purpose WebAssembly registries do not offer: the
+registry understands \emph{what} an accessor is (a GPAC filter with declared
+capabilities, linked as a dynamic side module), it serves accessors directly to
+browsers, and every publication is signed and appended to a log that consumers
+can verify without trusting the registry.
+
+\subsection{Package Model}
+\label{sec:registry-model}
+
+An accessor package consists of one WebAssembly side module and a manifest,
+\texttt{bevara.json}, shown in Listing~\ref{lst:manifest}. Beyond the fields
+that any package manager records (name, semantic version, description,
+license, dependencies), the manifest carries the information that the
+resolver of Section~\ref{sec:resolution} consumes: the GPAC filter names
+registered by the module, a summary of its input and output capabilities
+(stream type and codec), the \texttt{priority} used as a tie-breaker, and the
+legal side conditions (\texttt{licence\_required}, \texttt{georestrictions})
+by which a site may exclude accessors wholesale.
+
+\begin{lstlisting}[caption={Manifest of the Theora accessor. Fields below the
+blank line are build-time only and are stripped when publishing.},
+label={lst:manifest},basicstyle=\ttfamily\scriptsize]
+{ "name": "bevara:theora", "version": "1.2.0", "abi": 1,
+  "description": "Theora decoder", "filters": ["theoradec"],
+  "support": ["video"], "formats": ["Theora"],
+  "inputs":  [{"stream_type":"visual","codec":"theora"}],
+  "outputs": [{"stream_type":"visual","codec":"raw"}],
+  "priority": 50, "license": "BSD-3-Clause",
+  "licence_required": false, "georestrictions": false,
+  "dependencies": {"bevara:ogg": "^1.0.0"},
+  "sources": "https://github.com/.../theora",
+
+  "main": "build/theora_1.wasm",
+  "scripts": {"build": "emcmake cmake -S . -B build && cmake --build build"} }
+\end{lstlisting}
+
+\paragraph{Names and ABI.}
+Package names carry a namespace, following the convention of the Bytecode
+Alliance registry protocol~\cite{warg} (e.g.\ \texttt{bevara:theora}), so that packages remain
+addressable if they are ever mirrored to a component registry. Each account
+owns the namespace of its user name; the first publisher of a new namespace
+claims it; a default namespace holds the reference accessors and is reserved
+to administrators. The compiled artifact keeps the short file name
+\texttt{<package>\_<abi>.wasm}, where the integer \texttt{abi} is the suffix that
+the \texttt{with} attribute and the dynamic loader already use
+(\texttt{theora\_1}), and it is bumped only when the host interface of the
+main module changes, independently of the semantic version of the accessor
+itself. Versions are immutable once published; owners may \emph{deprecate}
+or \emph{yank} them, both of which are recorded (Section~\ref{sec:registry-trust}).
+
+\paragraph{Validation at publication.}
+The registry does not store opaque blobs. On upload it unpacks the tarball,
+checks the manifest against the schema, and parses the binary: the module must
+be well-formed and must carry a \texttt{dylink.0} custom
+section~\cite{emscripten-dylink}, i.e.\ it must have been linked as a side
+module that imports the shared memory and function table and exports
+\texttt{\_\_wasm\_call\_ctors}. A module that merely \emph{compiles} to
+WebAssembly but was linked as a standalone program is refused with an
+explanation, since \texttt{dlopen()} in the main module could not link it.
+The import and export tables extracted during this pass are stored with the
+version and exposed by \texttt{\toolname{} info}, which gives site developers
+a cheap check that, e.g., the expected \texttt{*\_register} entry points exist.
+
+\subsection{Capability Index and Delivery to Browsers}
+\label{sec:registry-index}
+
+Two views of the catalogue are served for machines. A compact index,
+\texttt{/accessors/index.json}, lists for every non-deprecated package its
+latest version, file name, capabilities, priority, legal flags, size and
+integrity digest; it is the ``mapping from a declared stream capability to a
+side module name'' that deferred resolution needs
+(Section~\ref{sec:ondemand}): when the demultiplexer of an Ogg container
+declares a \texttt{visual/theora} PID with no accepting filter loaded, the
+resolver selects, among index entries whose \texttt{inputs} match, the one with
+the best priority and requests \texttt{theora\_1.wasm}. A second view
+reproduces the \texttt{filter\_list.json} format of the existing filter
+repository, so current builds of the wrapper work unchanged.
+
+Accessors themselves are fetched from the registry like any static asset.
+\texttt{/accessors/theora\_1.wasm} returns the newest non-deprecated version
+for that ABI with a short cache lifetime, which is what a page using the
+library policy wants. Under the same prefix, the versioned form
+\texttt{bevara:theora/1.2.0/theora\_1.wasm} is instead immutable and cached
+indefinitely, which is what a page with an explicit
+\texttt{with} list and a lock file wants. Both are served with permissive
+CORS and cross-origin resource policy headers so that any origin may link
+them, and with a Brotli-compressed copy produced once at publication and
+negotiated through \texttt{Accept-Encoding}: the 13 accessors of
+Table~\ref{tab:reg-publish} shrink from 5.15\,MB to 1.36\,MB (26\%). Sites
+that prefer to self-host run \texttt{\toolname{} install}, which resolves the
+transitive closure of the declared dependencies (a decoder usually needs its
+demultiplexer), downloads each module into the page's \texttt{accessors/}
+directory under the exact name the \texttt{with} attribute expects, and prints
+the resulting attribute value. Resolution is flat: because the loader
+identifies modules by file name, a page can hold a single version of each
+accessor, and conflicting ranges are reported rather than silently resolved.
+
+\subsection{Verifiable Publication}
+\label{sec:registry-trust}
+
+An accessor executes with full access to the shared linear memory of the
+pipeline, in every page that links it. The registry is thus a supply-chain
+target in the sense documented for npm~\cite{ohm2020backstabber,
+zimmermann2019smallworld}: an attacker who obtains a publisher's token, or who
+compromises the registry host or its CDN, can substitute a module that will be
+linked into thousands of pages. We address three threats: (T1) a stolen
+credential used to publish under a maintainer's name; (T2) a registry that
+serves different bytes for the same version to different clients, or replaces
+a version after the fact; (T3) a registry that silently removes a version or a
+package from its history. The design borrows the record-and-log structure of
+Warg~\cite{warg} and of transparency logs in general~\cite{rfc6962,
+sigstore2022}, but stays deliberately small so that it can be verified by a
+few hundred lines of client code with no dependency beyond a hash function and
+a signature scheme.
+
+\paragraph{Signed records (T1).}
+Each publisher holds an Ed25519~\cite{bernstein2012ed25519} key pair, created
+by the CLI on first use and registered on the account. A publication is
+described by a \emph{record}---a canonical JSON object with the package name,
+version, ABI, file name, the SHA-256 of the module and of the tarball, the key
+identifier and a timestamp---signed by the publisher's private key and sent
+alongside the tarball. The registry recomputes the digests from the uploaded
+bytes, checks that they equal those in the record, that the key is registered
+to the authenticated account and not revoked, and that the signature verifies.
+A token alone no longer suffices to publish, and a revoked key invalidates
+future publications without affecting the validity of past ones.
+
+\paragraph{Append-only log (T2).}
+Accepted records are appended to a hash chain,
+$h_i = \mathrm{SHA256}(h_{i-1} \,\|\, \mathrm{SHA256}(r_i) \,\|\, \sigma_i)$
+with $h_0 = 0^{256}$, where $r_i$ is the canonical record and $\sigma_i$ its
+signature. Yank and deprecation operations are recorded in the same chain,
+signed by the registry's own key so that their origin is explicit. A
+\emph{checkpoint} $\langle n, h_n, t\rangle$ signed by the registry key is
+returned with every publication, every audit and with the capability index.
+The chain is linear rather than a Merkle tree: inclusion of entry $i$ is
+proven by the $n-i$ subsequent digests, which is $O(n)$ instead of
+$O(\log n)$, but the log of a codec registry grows by a few entries per week,
+verification is cheap (Table~\ref{tab:reg-log}), and the client needs no
+tree logic. We consider this an appropriate trade-off for a self-hosted
+registry; a deployment expecting millions of entries would switch to the
+Merkle structure of Warg without changing the record format.
+
+\paragraph{Client-side pinning (T3).}
+Verification happens where the trust is needed: in the site. When
+\texttt{\toolname{} install} downloads a module it checks the digest against
+the version document, verifies the publisher signature over the record, and
+writes to the lock file the digest, the key identifier and the log position of
+every accessor. \texttt{\toolname{} audit} then fetches the log entries
+published since the checkpoint pinned in the lock file, re-derives the chain
+from the pinned head, checks the new checkpoint's signature with the pinned
+registry key, and only then advances the pin. A registry that rewrote,
+reordered or dropped an entry cannot produce a chain that extends a head the
+client has already recorded, and a registry that presents different histories
+to different clients is caught as soon as two of them compare pins---the same
+gossip argument as for certificate transparency~\cite{rfc6962}. The audit also
+re-hashes the entries it fetches for the installed versions rather than
+trusting served hashes, flags versions that were yanked after installation,
+and reports advisories (a semver range with a severity) that administrators
+attach to packages, in the manner of \texttt{npm audit}.
+
+\subsection{Tooling}
+\label{sec:registry-tooling}
+
+The CLI mirrors the vocabulary of npm so that web developers need not learn a
+new workflow. For accessor authors, \texttt{init} scaffolds a filter project
+(manifest, CMake rules that link a side module, a GPAC filter skeleton with
+its capability table and self-registration constructor);
+\texttt{build}, \texttt{pack} and \texttt{publish} compile, bundle, sign and
+upload; \texttt{deprecate}, \texttt{unpublish} and \texttt{owner} maintain
+published packages. For site developers, \texttt{install}, \texttt{update},
+\texttt{outdated}, \texttt{uninstall} and \texttt{list} manage the
+\texttt{accessors/} directory and the lock file, \texttt{audit} performs the
+checks above, and \texttt{search}, \texttt{info} and \texttt{log} query the
+catalogue and the transparency log. Authentication uses the registry's
+identity provider through a browser round-trip that hands a token back to the
+CLI on a loopback port, as \texttt{npm login} does. The registry is a single
+process with an embedded database and a file store, packaged as a container
+and deployed with a persistent volume; the whole system (registry, CLI, tests)
+is about 3,000 lines of JavaScript with two third-party dependencies.
+
+\subsection{Cost}
+\label{sec:registry-eval}
+
+We measured the registry and CLI on the laptop of Section~\ref{sec:setup}
+(Apple M3 Pro), registry and client on the same machine, with the 13
+accessors of the Showcase that have a manifest in the filter repository.
+Table~\ref{tab:reg-publish} breaks down a publication. Packing and signing on
+the client take a few milliseconds; on the server, parsing the module,
+verifying the signature and appending to the log take 4.6\,ms in the median,
+and the remainder is the one-off Brotli compression at quality 11, roughly
+1.2\,ms per kilobyte of module. The capability index costs 611\,B per
+accessor uncompressed (1.6\,kB Brotli for 13 accessors); extrapolated to the
+86 accessors of Table~\ref{tab:eager}, the index a page must fetch to resolve
+on demand is about 52\,kB uncompressed and 11\,kB compressed, against the
+27.5\,MB that eager linking of the same 86 accessors transfers. Resolving a
+three-accessor dependency graph takes under a millisecond of client time, and
+downloading, hashing and signature-checking three modules totalling 1.6\,MB
+takes 5\,ms over loopback, i.e.\ verification is negligible against transfer.
+
+\begin{table}[t]
+\caption{Publication cost per accessor (median of one run each; sizes in kB,
+times in ms). \emph{Server} includes unpacking, manifest and side-module
+validation, signature verification, storage and log append; \emph{brotli} is
+the share of that time spent compressing the module at quality~11.}
+\label{tab:reg-publish}
+\centering\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrrr}
+\toprule
+Accessor & wasm & brotli & pack & sign & server & \emph{brotli} \\
+\midrule
+theora        &   36 &  15 &  1.9 & 0.11 &   38 &   37 \\
+ogg           &  214 &  71 &  5.2 & 0.24 &  269 &  266 \\
+vorbis        &  127 &  50 &  3.8 & 0.16 &  173 &  173 \\
+liba52        &  317 &  87 &  6.8 & 0.28 &  391 &  375 \\
+libjxl        &  702 & 165 & 12.8 & 0.44 &  987 &  957 \\
+ffmpeg-hevc   & 1236 & 261 & 22.5 & 0.67 & 1499 & 1484 \\
+isobmff       & 1326 & 387 & 30.4 & 0.74 & 1608 & 1605 \\
+\midrule
+All 13 (total $|$ median) & 5151 & 1356 & 5.2 & 0.27 & 269 & 266 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:reg-log} gives the cost of verifying the log on the client,
+for synthetic logs of $10^3$ and $10^4$ signed publications by 20 publishers.
+Recomputing the hash chain alone costs 2.6\,\textmu s per entry; checking
+every Ed25519 signature as well costs 78\,\textmu s per entry, so a full
+verification from genesis of a ten-thousand-entry log---several years of
+activity for a codec registry---takes 0.8\,s and transfers 6.5\,MB, while
+the incremental audit a site performs routinely (50 new entries since its
+pinned checkpoint) takes 4\,ms and 33\,kB. Verification therefore fits in a
+continuous-integration step or a pre-deployment hook without noticeable cost.
+
+\begin{table}[t]
+\caption{Client-side verification of the transparency log (single core).}
+\label{tab:reg-log}
+\centering\small
+\begin{tabular}{lrr}
+\toprule
+ & $N = 10^3$ & $N = 10^4$ \\
+\midrule
+Log size (JSON)                 & 648\,kB & 6.5\,MB \\
+Hash chain only                 & 2.9\,ms & 26\,ms \\
+Chain + all signatures          & 79\,ms  & 776\,ms \\
+Incremental (50 new entries)    & 4.2\,ms & 4.0\,ms \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Relation to Existing Registries}
+\label{sec:registry-related}
+
+npm~\cite{npm} established the workflow we mirror (manifest, semantic
+versioning, lock file, \texttt{audit}) and its ecosystem studies motivate the
+threat model~\cite{zimmermann2019smallworld,ohm2020backstabber}, but npm
+packages are JavaScript and its registry neither validates WebAssembly nor
+serves it to browsers. WAPM~\cite{wapm}, now the Wasmer registry, distributes
+WASI programs for a server-side runtime; the Bytecode Alliance registry
+protocol Warg~\cite{warg} and the \texttt{wkg} tooling distribute
+\emph{components} with typed WIT interfaces, increasingly over OCI
+registries~\cite{oci-artifacts}. Neither models the object we distribute: a
+side module with a C ABI towards a host that shares linear memory with it, a
+choice the component model excludes by design and on which the zero-copy
+pipelines of Section~\ref{sec:performance} depend. What we retain from Warg
+is its naming and its record-and-log structure, and from
+Sigstore~\cite{sigstore2022} and TUF~\cite{samuel2010tuf} the principle that
+consumers, not the registry, are the verifiers. Should the component model
+gain a dynamic-linking story with shared memory, accessors could become
+components and Warg their transport; the capability index and the browser
+delivery layer described here would remain the part specific to media
+pipelines.

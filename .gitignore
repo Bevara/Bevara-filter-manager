@@ -4,3 +4,5 @@ node_modules/
 packages/registry/data/
 /tmp/
 secret.yaml
+.vscode/debug-registry-data/
+.vscode/debug-bevararc

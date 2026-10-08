@@ -57,7 +57,14 @@ export function readBody(req, { limit = 256 * 1024 * 1024 } = {}) {
     let size = 0;
     req.on('data', (c) => {
       size += c.length;
-      if (size > limit) { reject(new HttpError(413, `body exceeds ${limit} bytes`)); req.destroy(); return; }
+      if (size > limit) {
+        // Stop consuming, but leave the socket alive: destroying it here would
+        // close the connection before the 413 response reached the client,
+        // which then sees a dropped connection instead of the reason.
+        req.pause();
+        reject(new HttpError(413, `body exceeds the ${limit} byte limit of this registry`));
+        return;
+      }
       chunks.push(c);
     });
     req.on('end', () => resolve(Buffer.concat(chunks)));

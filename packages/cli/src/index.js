@@ -12,13 +12,20 @@ export const COMMANDS = {
   list: { alias: ['ls'], desc: 'List filters (installed in the project, or on the registry with --remote)', mod: './commands/list.js' },
   search: { alias: ['find'], desc: 'Search filters on the registry', usage: '<query>', mod: './commands/search.js' },
   info: { alias: ['view', 'show'], desc: 'Show details about a filter', usage: '<filter[@version]>', mod: './commands/info.js' },
-  build: { desc: 'Build the filter (.wasm side module) with Emscripten', mod: './commands/build.js' },
-  pack: { desc: 'Create the publishable tarball without uploading it', mod: './commands/pack.js' },
-  publish: { desc: 'Publish the filter in the current directory to the registry', mod: './commands/publish.js' },
+  probe: { alias: ['identify'], desc: 'Identify a media file and the accessors needed to play it', usage: '<file|url...>', mod: './commands/probe.js' },
+  'update-page': { alias: ['page'], desc: 'Rewrite an HTML page to use the universal tags for its media', usage: '<file.html...>', mod: './commands/update-page.js' },
+  build: { desc: 'Build the filter (.wasm side module) with Emscripten', usage: '[dir]', mod: './commands/build.js' },
+  test: { alias: ['check'], desc: 'Run a real pipeline on a file and report whether it decodes', usage: '<file...>', mod: './commands/test.js' },
+  bench: { desc: 'Measure decoding performance of a pipeline', usage: '<file...>', mod: './commands/bench.js' },
+  pack: { desc: 'Create the publishable tarball without uploading it', usage: '[dir]', mod: './commands/pack.js' },
+  publish: { desc: 'Publish a filter to the registry', usage: '[dir]', mod: './commands/publish.js' },
   unpublish: { desc: 'Remove a published version (or a whole filter)', usage: '<filter[@version]>', mod: './commands/unpublish.js' },
   deprecate: { desc: 'Mark a filter or version range as deprecated', usage: '<filter[@range]> <message>', mod: './commands/deprecate.js' },
   owner: { desc: 'Manage who can publish a filter', usage: '<add|rm|ls> [user] <filter>', mod: './commands/owner.js' },
   advisory: { desc: 'Manage security/quality advisories (admin)', usage: '<add|rm|ls> ...', mod: './commands/advisory.js' },
+  log: { desc: 'Show or verify the registry transparency log', usage: '[filter] [--verify]', mod: './commands/log.js' },
+  key: { desc: 'Manage the Ed25519 key that signs your publishes', usage: '<generate|register|ls|revoke|show>', mod: './commands/key.js' },
+  namespace: { alias: ['ns'], desc: 'List namespaces or manage their owners', usage: '<ls|add|rm> [user] [namespace]', mod: './commands/namespace.js' },
   login: { desc: 'Authenticate against the registry', mod: './commands/login.js' },
   logout: { desc: 'Forget the stored token', mod: './commands/login.js', fn: 'logout' },
   whoami: { desc: 'Show the logged-in user', mod: './commands/login.js', fn: 'whoami' },
@@ -85,6 +92,7 @@ export async function main(argv) {
   } catch (e) {
     if (e instanceof CliError || e instanceof RegistryError) {
       log.error(e.message);
+      for (const d of e.details ?? []) console.error(color.dim('    ' + d));
       if (e.extra?.errors) for (const x of e.extra.errors) log.error('  ' + x);
       if (e.hint) console.error(color.dim(`  hint: ${e.hint}`));
       if (parsed.values.verbose && e.stack) console.error(color.dim(e.stack));

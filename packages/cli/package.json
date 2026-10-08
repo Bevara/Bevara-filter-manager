@@ -1,10 +1,29 @@
 {
   "name": "@bevara/cli",
-  "version": "1.0.0",
-  "description": "npm-like package manager for Bevara WebAssembly filters (accessors)",
+  "version": "0.0.1",
+  "description": "Filter manager for Bevara",
+  "keywords": [
+    "Filter",
+    "WebAssembly",
+    "Bevara"
+  ],
+  "homepage": "https://github.com/Bevara/Bevara-filter-manager#readme",
+  "bugs": {
+    "url": "https://github.com/Bevara/Bevara-filter-manager/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Bevara/Bevara-filter-manager.git"
+  },
+  "license": "MIT",
+  "author": "Bevara",
   "type": "module",
+  "main": "src/index.js",
   "bin": {
     "bevara": "bin/bevara.js"
+  },
+  "directories": {
+    "test": "test"
   },
   "files": [
     "bin",
@@ -21,5 +40,7 @@
   "engines": {
     "node": ">=20"
   },
-  "license": "MIT"
+  "publishConfig": {
+    "access": "public"
+  }
 }

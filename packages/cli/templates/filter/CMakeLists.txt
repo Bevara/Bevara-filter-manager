@@ -19,8 +19,9 @@ set({{NAME_UPPER}}_INCLUDE
 set({{NAME_UPPER}}_DEFINITIONS
 )
 
-# Last argument is the ABI number: it becomes the "_1" suffix of the .wasm and
-# must match "abi" in bevara.json.
+# Last argument is the module generation: it becomes the "_1" suffix of the .wasm,
+# the name pages load (with="{{NAME}}_1"). Increment it when the module changes;
+# bevara publishes generation N as version N.0.0 unless the manifest sets "version".
 add_filter({{NAME}}
   "${{{NAME_UPPER}}_SRC}"
   "${{{NAME_UPPER}}_LIB}"

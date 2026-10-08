@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { log, color, table, formatBytes } from '../lib/ui.js';
 import { clientFor, Project } from '../lib/ctx.js';
-import { MANIFEST } from '../lib/project.js';
 
 export const options = { remote: { type: 'boolean', short: 'a' }, support: { type: 'string' }, format: { type: 'string' }, long: { type: 'boolean', short: 'l' } };
 export const help = `Without arguments lists the filters installed in the current project. Outside a
@@ -15,7 +14,7 @@ Options:
 
 export async function run({ opts }) {
   const project = Project.load({ required: false });
-  const inProject = fs.existsSync(path.join(project.root, MANIFEST)) && !project.isFilter;
+  const inProject = !!project.manifestFile && !project.isFilter;
   if (!opts.remote && inProject) return listInstalled(project, opts);
   return listRemote(project, opts);
 }

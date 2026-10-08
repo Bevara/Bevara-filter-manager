@@ -16,6 +16,41 @@ Authenticated routes take `Authorization: Bearer <token>`.
 
 The first account created and the names in `ADMIN_USERS` get the `admin` role.
 
+## Names
+Filters are named `<namespace>:<package>` (Warg/`wkg` convention), e.g. `bevara:theora`.
+A bare `theora` is resolved to `DEFAULT_NAMESPACE:theora`. Every account owns the
+namespace of its username; the first publisher of an unknown namespace claims it;
+only admins create packages in the default namespace. `:` must be percent-encoded
+in paths (`/filters/bevara%3Atheora`), except in `/accessors/bevara:theora_1.wasm`.
+
+## Signing keys
+| Method | Path | Notes |
+|---|---|---|
+| PUT | `/-/keys` | auth, `{publicKey (Ed25519 SPKI DER, base64), label?}` → `{keyId}` (`sha256:` + 16 bytes of the key digest) |
+| GET | `/-/keys` | auth → own keys |
+| GET | `/-/keys/:keyId` | public: key + owner |
+| DELETE | `/-/keys/:keyId` | revoke (existing log entries stay valid) |
+
+## Transparency log
+Every accepted publish appends `{seq, prevHash, hash, record, signature, keyId}` to a
+hash chain: `hash = sha256(prevHash ‖ sha256(canonical(record)) ‖ signature)`, genesis
+`prevHash = 0…0`. Publish records are signed by the publisher; `yank` / `deprecate`
+records by the registry key. A **checkpoint** `{seq, head, timestamp, keyId}` is signed
+by the registry key and returned with every publish, `/-/audit` and `/accessors/index.json`.
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/-/log?since=&limit=&name=` | entries after `since`, plus the current checkpoint |
+| GET | `/-/log/checkpoint` | |
+| GET | `/-/log/:seq` | entry + the digests needed to recompute the head from it (linear inclusion proof) |
+| GET | `/-/log/keys/all` | every public key referenced by the log (publishers + registry) |
+
+Publish record (canonical JSON, sorted keys):
+```json
+{"abi":1,"file":"theora_1.wasm","keyId":"sha256:…","name":"bevara:theora","tarballSha256":"…","timestamp":"…","type":"publish","version":"1.2.0","wasmSha256":"…"}
+```
+sent as `x-bevara-record` (base64) and `x-bevara-signature` (base64 Ed25519) headers on `PUT /filters/:name/:version`.
+The registry checks the record against the uploaded bytes, the key against the token's user, then appends.
+
 ## Catalog
 | Method | Path | Notes |
 |---|---|---|
@@ -35,16 +70,31 @@ Each version document is the published manifest plus:
 ## Publishing (auth)
 | Method | Path | Notes |
 |---|---|---|
-| PUT | `/filters/:name/:version` | body = gzipped tarball (`Content-Type: application/gzip`). Validates manifest, name/version match, side-module check, ownership; 409 if the version exists |
+| PUT | `/filters/:name/:version` | body = gzipped tarball (`Content-Type: application/gzip`). Validates manifest, name/version match, side-module check, ownership; `409` if the version exists, or if another package already provides the same accessor name (see below) |
 | DELETE | `/filters/:name/:version` | unpublish one version (owner/admin) |
 | DELETE | `/filters/:name` | unpublish everything (owner/admin) |
 | POST | `/filters/:name/deprecate` | `{version?: range, message}` (empty message clears) |
 | PUT/DELETE | `/filters/:name/owners/:user` | manage owners |
 
+### Accessor-name uniqueness
+The accessor name is the `.wasm` base name without its generation, lowercased (`theora_1.wasm`
+→ `theora`). It belongs to the first package that publishes it, across all
+namespaces; the reservation (table `accessor_names`) is checked before any file
+is written and again inside the publishing transaction, and is released when
+that package is deleted entirely. A refusal looks like:
+```json
+{ "error": "the accessor name \"theora\" is already taken by bevara:theora: …",
+  "hint": "pick another name (or \"module\") for this accessor, or ask the owners of bevara:theora to add you: …" }
+```
+Error responses may carry a `hint`, which the CLI prints as is. Registries
+created before the reservation existed fill it at start-up from what is
+published; clashes already present are logged, and the first publisher keeps
+the name.
+
 ## Audit
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/-/audit` | `{filters: {name: version}}` → per-filter latest/deprecation/integrity/advisories |
+| POST | `/-/audit` | `{filters: {name: version}}` → per-filter latest/deprecation/integrity/signature/advisories + checkpoint |
 | GET | `/-/advisories?names=a,b` | |
 | POST | `/-/advisories` | admin: `{name, range, severity, title, url?}` |
 | DELETE | `/-/advisories/:id` | admin |
@@ -67,3 +117,5 @@ See PACKAGE_FORMAT.md — `/accessors/<name>_<abi>.wasm`, `/accessors/<name>/<ve
 | `BOOTSTRAP_ADMIN_USER/PASSWORD` | | create an admin at startup if missing |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_SCOPE` | | single sign-on (Casdoor) |
 | `MAX_TARBALL_BYTES` | 256 MiB | |
+| `DEFAULT_NAMESPACE` | `bevara` | namespace for bare names |
+| `REQUIRE_SIGNATURES` | `true` | `false` accepts unsigned publishes (not logged) |

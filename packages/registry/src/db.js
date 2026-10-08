@@ -62,6 +62,45 @@ CREATE TABLE IF NOT EXISTS advisories (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 CREATE INDEX IF NOT EXISTS advisories_name ON advisories(name);
+CREATE TABLE IF NOT EXISTS namespaces (
+  name TEXT PRIMARY KEY,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS namespace_owners (
+  namespace TEXT NOT NULL REFERENCES namespaces(name) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (namespace, user_id)
+);
+-- Publisher signing keys (Ed25519, SPKI DER base64). A key is bound to one user.
+CREATE TABLE IF NOT EXISTS user_keys (
+  key_id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  public_key TEXT NOT NULL,
+  label TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  revoked_at TEXT
+);
+-- Append-only, hash-chained log of signed records (publish / yank / deprecate).
+CREATE TABLE IF NOT EXISTS log (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  prev_hash TEXT NOT NULL,
+  hash TEXT NOT NULL UNIQUE,
+  record TEXT NOT NULL,
+  signature TEXT NOT NULL,
+  key_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS log_name ON log(name);
+-- One package per accessor name. Pages load accessors by file name
+-- (with="theora_1"), so two packages providing theora_*.wasm - whatever their
+-- namespace or generation, and whatever the letter case - would be ambiguous. The key
+-- is the lowercased module name; the row goes when its package is deleted.
+CREATE TABLE IF NOT EXISTS accessor_names (
+  key TEXT PRIMARY KEY,
+  name TEXT NOT NULL REFERENCES filters(name) ON DELETE CASCADE
+);
 `;
 
 export function openDb(file = ':memory:') {

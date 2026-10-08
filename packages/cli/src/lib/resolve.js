@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto';
 import semver from 'semver';
 import { CliError, log, color } from './ui.js';
 import { RegistryError } from './registry-client.js';
+import { verifyRecord, keyIdOf } from './sig.js';
+import { shortName } from './manifest.js';
 
 // Parses "theora", "theora@^1.2", "theora@1.0.0", "theora@latest".
 export function parseSpec(spec) {
@@ -28,13 +30,13 @@ export function pickVersion(packument, range) {
 // accessors directory (the player loads them by <name>_<abi>.wasm). Ranges
 // coming from different requesters must all be satisfied by the chosen version.
 export async function resolveTree(client, roots, { lock = {}, prefer = 'lock' } = {}) {
-  const chosen = new Map();     // name -> { version, doc, requestedBy: [range...] }
+  const chosen = new Map();     // canonical name -> { version, doc, requestedBy: [range...], aliases: Set }
   const packuments = new Map();
   const queue = Object.entries(roots).map(([name, range]) => ({ name, range, by: 'root' }));
 
   const getPackument = async (name) => {
     if (!packuments.has(name)) {
-      try { packuments.set(name, await client.packument(name)); }
+      try { const p = await client.packument(name); packuments.set(name, p); packuments.set(p.name, p); }
       catch (e) {
         if (e instanceof RegistryError && e.status === 404) throw new CliError(`filter "${name}" does not exist on ${client.base}`, { hint: 'check the name with `bevara search`' });
         throw e;
@@ -44,11 +46,14 @@ export async function resolveTree(client, roots, { lock = {}, prefer = 'lock' } 
   };
 
   while (queue.length) {
-    const { name, range, by } = queue.shift();
-    const p = await getPackument(name);
+    const { name: typed, range, by } = queue.shift();
+    const p = await getPackument(typed);
+    const name = p.name;               // canonical "<namespace>:<package>"
+    const lockEntry = lock[name] ?? lock[typed];
     const wanted = range === 'latest' ? '*' : range;
     const current = chosen.get(name);
     if (current) {
+      current.aliases.add(typed);
       if (range === 'latest' || semver.satisfies(current.version, wanted, { includePrerelease: true })) { current.requestedBy.push(`${by}:${range}`); continue; }
       const combined = [...current.requestedBy.map((r) => r.split(':').slice(1).join(':')), range].filter((r) => r !== 'latest');
       const candidates = Object.keys(p.versions).filter((v) => combined.every((r) => semver.satisfies(v, r, { includePrerelease: true })));
@@ -59,14 +64,36 @@ export async function resolveTree(client, roots, { lock = {}, prefer = 'lock' } 
       continue;
     }
     let version = null;
-    if (prefer === 'lock' && lock[name] && semver.satisfies(lock[name].version, wanted, { includePrerelease: true }) && p.versions[lock[name].version]) version = lock[name].version;
+    if (prefer === 'lock' && lockEntry && semver.satisfies(lockEntry.version, wanted, { includePrerelease: true }) && p.versions[lockEntry.version]) version = lockEntry.version;
     else version = pickVersion(p, range);
     if (!version) throw new CliError(`no version of ${name} satisfies "${range}" (available: ${Object.keys(p.versions).join(', ') || 'none'})`);
     const doc = p.versions[version];
-    chosen.set(name, { version, doc, requestedBy: [`${by}:${range}`], packument: p });
+    chosen.set(name, { version, doc, requestedBy: [`${by}:${range}`], packument: p, aliases: new Set([typed]) });
     for (const [d, r] of Object.entries(doc.dependencies ?? {})) queue.push({ name: d, range: r, by: `${name}@${version}` });
   }
+  // Two namespaces publishing the same package name would produce the same
+  // <pkg>_<abi>.wasm file: refuse rather than silently overwrite.
+  const byFile = new Map();
+  for (const [name, c] of chosen) {
+    const other = byFile.get(c.doc.dist.file);
+    if (other) throw new CliError(`${name} and ${other} both produce ${c.doc.dist.file}; a page can only load one of them`);
+    byFile.set(c.doc.dist.file, name);
+  }
   return chosen;
+}
+
+export const findChosen = (chosen, typed) => chosen.get(typed) ?? [...chosen.values()].find((c) => c.aliases.has(typed));
+
+// Verifies the publisher signature carried by a version document against the
+// downloaded bytes. Returns the signature summary stored in the lockfile.
+export function checkSignature(name, version, doc, wasmSha256Hex) {
+  const sig = doc.signature;
+  if (!sig) return null;
+  if (keyIdOf(sig.publicKey) !== sig.keyId) throw new CliError(`${name}@${version}: signing key does not match its id`);
+  if (sig.record.wasmSha256 !== wasmSha256Hex) throw new CliError(`${name}@${version}: signed record does not describe the downloaded module`);
+  if (sig.record.name !== name || sig.record.version !== version) throw new CliError(`${name}@${version}: signed record is for ${sig.record.name}@${sig.record.version}`);
+  if (!verifyRecord(sig.record, sig.signature, sig.publicKey)) throw new CliError(`${name}@${version}: invalid publisher signature`);
+  return { keyId: sig.keyId, logSeq: sig.logSeq, logHash: sig.logHash, signedBy: doc.publishedBy };
 }
 
 export async function installResolved(client, project, chosen, { registry, quiet = false } = {}) {
@@ -76,19 +103,23 @@ export async function installResolved(client, project, chosen, { registry, quiet
     const target = path.join(project.accessorsDir, doc.dist.file);
     const lockEntry = project.lock.filters[name];
     const upToDate = lockEntry?.version === version && fs.existsSync(target) && project.localIntegrity(name) === doc.dist.integrity;
+    let signature = lockEntry?.signature ?? null;
     if (!upToDate) {
       const buf = await client.download(doc.dist.wasm);
-      const got = 'sha256-' + createHash('sha256').update(buf).digest('base64');
+      const digest = createHash('sha256').update(buf).digest();
+      const got = 'sha256-' + digest.toString('base64');
       if (got !== doc.dist.integrity) throw new CliError(`integrity check failed for ${name}@${version}: expected ${doc.dist.integrity}, got ${got}`);
-      // Remove a previous build of the same filter with another ABI suffix.
+      signature = checkSignature(name, version, doc, digest.toString('hex'));
+      if (!signature && !quiet) log.warn(`${name}@${version} is not signed by its publisher`);
+      // Remove a previous build of the same filter from another generation (_1, _2…).
       if (lockEntry?.file && lockEntry.file !== doc.dist.file) fs.rmSync(path.join(project.accessorsDir, lockEntry.file), { force: true });
       fs.writeFileSync(target, buf);
-      fs.writeFileSync(path.join(project.accessorsDir, `${name}.json`), JSON.stringify(stripDist(doc), null, 2) + '\n');
+      fs.writeFileSync(path.join(project.accessorsDir, `${shortName(name)}.json`), JSON.stringify(stripDist(doc), null, 2) + '\n');
       installed.push({ name, version, from: lockEntry?.version ?? null });
     }
     project.lock.filters[name] = {
       version, abi: doc.abi, file: doc.dist.file, integrity: doc.dist.integrity, resolved: doc.dist.wasm,
-      license: doc.license, dependencies: doc.dependencies ?? {},
+      license: doc.license, dependencies: doc.dependencies ?? {}, signature,
     };
     if (packument?.deprecated && !quiet) log.warn(`${name} is deprecated: ${packument.deprecated}`);
     if (doc.deprecated && !quiet) log.warn(`${name}@${version} is deprecated: ${doc.deprecated}`);
@@ -99,7 +130,7 @@ export async function installResolved(client, project, chosen, { registry, quiet
     if (chosen.has(name)) continue;
     const entry = project.lock.filters[name];
     fs.rmSync(path.join(project.accessorsDir, entry.file), { force: true });
-    fs.rmSync(path.join(project.accessorsDir, `${name}.json`), { force: true });
+    fs.rmSync(path.join(project.accessorsDir, `${shortName(name)}.json`), { force: true });
     delete project.lock.filters[name];
     if (!quiet) log.step(`removed ${color.bold(name)} (no longer required)`);
   }

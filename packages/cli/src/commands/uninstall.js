@@ -8,8 +8,10 @@ export async function run({ args, opts }) {
   const { registry, client } = clientFor(opts, project);
   project.manifest.dependencies ??= {};
   for (const name of args) {
-    if (!(name in project.manifest.dependencies)) log.warn(`${name} is not a direct dependency`);
-    delete project.manifest.dependencies[name];
+    // accept the canonical name or the bare alias
+    const key = Object.keys(project.manifest.dependencies).find((k) => k === name || k.endsWith(`:${name}`) || name.endsWith(`:${k}`));
+    if (!key) log.warn(`${name} is not a direct dependency`);
+    else delete project.manifest.dependencies[key];
   }
   project.saveManifest();
   const chosen = await resolveTree(client, project.manifest.dependencies, { lock: project.lock.filters });

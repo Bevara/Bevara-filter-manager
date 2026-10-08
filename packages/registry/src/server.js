@@ -12,6 +12,8 @@ const app = createApp({
   adminUsers: (env.ADMIN_USERS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
   oidc: env.OIDC_ISSUER ? { issuer: env.OIDC_ISSUER, clientId: env.OIDC_CLIENT_ID, clientSecret: env.OIDC_CLIENT_SECRET, scope: env.OIDC_SCOPE } : null,
   maxTarball: env.MAX_TARBALL_BYTES ? parseInt(env.MAX_TARBALL_BYTES, 10) : undefined,
+  defaultNamespace: env.DEFAULT_NAMESPACE,
+  requireSignatures: env.REQUIRE_SIGNATURES !== 'false',
   log: (msg) => console.log(new Date().toISOString(), msg),
 });
 
@@ -23,7 +25,7 @@ if (env.BOOTSTRAP_ADMIN_USER && env.BOOTSTRAP_ADMIN_PASSWORD && !app.auth.getUse
 }
 
 app.server.listen(port, host, () => {
-  console.log(`${app.config.name} listening on http://${host}:${port} (data: ${app.config.dataDir}, oidc: ${app.config.oidc ? app.config.oidc.issuer : 'off'})`);
+  console.log(`${app.config.name} listening on http://${host}:${port} (data: ${app.config.dataDir}, oidc: ${app.config.oidc ? app.config.oidc.issuer : 'off'}, registry key: ${app.ledger.keyId}, signatures ${app.config.requireSignatures ? 'required' : 'optional'})`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { app.server.close(); app.db.close(); process.exit(0); });

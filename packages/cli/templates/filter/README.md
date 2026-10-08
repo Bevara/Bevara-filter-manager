@@ -12,10 +12,10 @@ and the GPAC headers matching the solver:
 ```bash
 source /path/to/emsdk/emsdk_env.sh
 export GPAC_DIR=/path/to/gpac
-bevara build            # emcmake cmake -S . -B build && cmake --build build
+bevara build            # emcmake cmake -S . -B .bevara/.build && cmake --build .bevara/.build
 ```
 
-The result is `build/{{NAME}}_1.wasm`.
+The result is `.bevara/.build/{{NAME}}_1.wasm` (`.bevara/` is git-ignored).
 
 ## Publish
 

@@ -1,0 +1,172 @@
+{
+  // Debug configurations for the bevara CLI and the registry.
+  //
+  // "autoAttachChildProcesses" matters here: `bevara test` and `bevara bench`
+  // run each pipeline in a child process (src/lib/run-session.cjs), and the
+  // publish/login flows spawn helpers too - without it breakpoints in those
+  // files are never hit.
+  //
+  // Every CLI configuration points BEVARA_CONFIG at .vscode/debug-bevararc so
+  // that debugging never touches the real ~/.bevararc (tokens, signing keys).
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "bevara <args…>",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/packages/cli/bin/bevara.js",
+      "args": ["${input:bevaraArgs}"],
+      "cwd": "${input:workingDir}",
+      "console": "integratedTerminal",
+      "autoAttachChildProcesses": true,
+      "skipFiles": ["<node_internals>/**"],
+      // No BEVARA_REGISTRY here: like the installed CLI, this talks to the
+      // default registry (https://registry.bevara.ddns.net).
+      "env": {
+        "BEVARA_CONFIG": "${workspaceFolder}/.vscode/debug-bevararc"
+      }
+    },
+    {
+      "name": "bevara <args…> (local registry)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/packages/cli/bin/bevara.js",
+      "args": ["${input:bevaraArgs}"],
+      "cwd": "${input:workingDir}",
+      "console": "integratedTerminal",
+      "autoAttachChildProcesses": true,
+      "skipFiles": ["<node_internals>/**"],
+      "env": {
+        "BEVARA_CONFIG": "${workspaceFolder}/.vscode/debug-bevararc",
+        "BEVARA_REGISTRY": "http://127.0.0.1:8080"
+      }
+    },
+    {
+      "name": "bevara probe (current file)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/packages/cli/bin/bevara.js",
+      "args": ["probe", "${file}", "--offline"],
+      "cwd": "${fileDirname}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"],
+      "env": { "BEVARA_CONFIG": "${workspaceFolder}/.vscode/debug-bevararc" }
+    },
+    {
+      "name": "bevara update-page (current file)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/packages/cli/bin/bevara.js",
+      "args": ["update-page", "${file}", "--offline"],
+      "cwd": "${fileDirname}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"],
+      "env": { "BEVARA_CONFIG": "${workspaceFolder}/.vscode/debug-bevararc" }
+    },
+    {
+      "name": "bevara test (current file)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/packages/cli/bin/bevara.js",
+      "args": ["test", "${file}", "--accessors", "${input:accessorsDir}", "-v"],
+      "cwd": "${fileDirname}",
+      "console": "integratedTerminal",
+      "autoAttachChildProcesses": true,
+      "skipFiles": ["<node_internals>/**"],
+      "env": { "BEVARA_CONFIG": "${workspaceFolder}/.vscode/debug-bevararc" }
+    },
+    {
+      "name": "registry (localhost:8080)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/packages/registry/src/server.js",
+      "cwd": "${workspaceFolder}/packages/registry",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"],
+      "env": {
+        "PORT": "8080",
+        "DATA_DIR": "${workspaceFolder}/.vscode/debug-registry-data",
+        "PUBLIC_URL": "http://127.0.0.1:8080",
+        "BOOTSTRAP_ADMIN_USER": "admin",
+        "BOOTSTRAP_ADMIN_PASSWORD": "debugdebug",
+        "ALLOW_SIGNUP": "true"
+      }
+    },
+    {
+      "name": "tests: all",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["test"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "autoAttachChildProcesses": true,
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "tests: current file",
+      "type": "node",
+      "request": "launch",
+      "program": "${file}",
+      "runtimeArgs": ["--test"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "autoAttachChildProcesses": true,
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "tests: current file, only the test under the cursor",
+      "type": "node",
+      "request": "launch",
+      "program": "${file}",
+      "runtimeArgs": ["--test", "--test-name-pattern", "${input:testName}"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "e2e (registry + CLI)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["${workspaceFolder}/scripts/e2e.sh"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "autoAttachChildProcesses": true,
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ],
+  "compounds": [
+    {
+      "name": "registry + bevara <args…> (local registry)",
+      "configurations": ["registry (localhost:8080)", "bevara <args…> (local registry)"],
+      "stopAll": true
+    }
+  ],
+  "inputs": [
+    {
+      "id": "bevaraArgs",
+      "type": "promptString",
+      "description": "bevara arguments, e.g. `probe clip.mp4` or `list --remote`",
+      "default": "--help"
+    },
+    {
+      "id": "workingDir",
+      "type": "promptString",
+      "description": "working directory for the command (a site project, for install/update-page)",
+      "default": "${workspaceFolder}"
+    },
+    {
+      "id": "accessorsDir",
+      "type": "promptString",
+      "description": "directory holding solver_1.js/.wasm and the accessor .wasm files",
+      "default": "${workspaceFolder}/../Showcase/accessors"
+    },
+    {
+      "id": "testName",
+      "type": "promptString",
+      "description": "test name pattern (a substring of the test title)",
+      "default": ""
+    }
+  ]
+}

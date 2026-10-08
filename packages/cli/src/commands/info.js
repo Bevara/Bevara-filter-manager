@@ -31,6 +31,7 @@ export async function run({ args, opts }) {
     ['Integrity', v.dist.integrity],
     ['Exports', (v.wasm?.exports ?? []).slice(0, 12).join(', ') + ((v.wasm?.exports?.length ?? 0) > 12 ? ` … (${v.wasm.exports.length})` : '')],
     ['Published', `${v.publishedAt} by ${v.publishedBy}`],
+    ['Signature', v.signature ? `${v.signature.keyId} · log #${v.signature.logSeq} ${color.dim(v.signature.logHash?.slice(0, 16) + '…')}` : color.yellow('unsigned')],
     ['Owners', p.owners.join(', ')],
     ['Versions', Object.keys(p.versions).map((x) => (x === version ? color.green(x) : x)).join(', ')],
     ['Downloads', p.downloads],

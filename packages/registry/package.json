@@ -1,6 +1,6 @@
 {
   "name": "@bevara/registry",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Self-hosted registry for Bevara WebAssembly filters",
   "type": "module",
   "main": "src/app.js",

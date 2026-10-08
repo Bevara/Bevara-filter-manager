@@ -76,3 +76,52 @@ describe('resolver', () => {
     await assert.rejects(resolveTree(client, { a: '1.1.0', b: '1.0.0' }), /cannot satisfy b/);
   });
 });
+
+describe('signatures and log', async () => {
+  const { generateKeyPair, signRecord, verifyRecord, canonicalize, entryHash, verifyChain, keyIdOf, GENESIS } = await import('../src/lib/sig.js');
+  test('canonical JSON is key-sorted and stable', () => {
+    assert.equal(canonicalize({ b: 1, a: [3, { z: 1, y: undefined }] }), '{"a":[3,{"z":1}],"b":1}');
+  });
+  test('sign / verify round trip, tamper detection', () => {
+    const k = generateKeyPair();
+    assert.equal(keyIdOf(k.publicKey), k.keyId);
+    const rec = { type: 'publish', name: 'bevara:x', version: '1.0.0' };
+    const sig = signRecord(rec, k.privateKey);
+    assert.equal(verifyRecord(rec, sig, k.publicKey), true);
+    assert.equal(verifyRecord({ ...rec, version: '1.0.1' }, sig, k.publicKey), false);
+    assert.equal(verifyRecord(rec, sig, generateKeyPair().publicKey), false);
+  });
+  test('hash chain verification', () => {
+    const k = generateKeyPair();
+    const entries = [];
+    let prev = GENESIS;
+    for (let i = 1; i <= 3; i++) {
+      const record = { type: 'publish', name: 'bevara:x', version: `1.0.${i}`, keyId: k.keyId };
+      const signature = signRecord(record, k.privateKey);
+      const hash = entryHash(prev, record, signature);
+      entries.push({ seq: i, record, signature, keyId: k.keyId, hash });
+      prev = hash;
+    }
+    const resolveKey = () => k.publicKey;
+    assert.equal(verifyChain(entries, { resolveKey }).ok, true);
+    assert.equal(verifyChain(entries, { resolveKey }).head, prev);
+    assert.equal(verifyChain(entries.slice(1), { resolveKey, startHash: entries[0].hash, startSeq: 1 }).ok, true);
+    assert.match(verifyChain([entries[0], entries[2]], { resolveKey }).error, /gap/);
+    const t = structuredClone(entries); t[1].record.version = '9.9.9';
+    assert.match(verifyChain(t, { resolveKey }).error, /hash mismatch/);
+    assert.match(verifyChain(entries, { resolveKey: () => null }).error, /unknown key/);
+  });
+});
+
+describe('namespaced names', async () => {
+  const { fullName, splitName, shortName, NAME_RE } = await import('../src/lib/manifest.js');
+  test('helpers', () => {
+    assert.equal(fullName('theora', 'bevara'), 'bevara:theora');
+    assert.equal(fullName('acme:theora', 'bevara'), 'acme:theora');
+    assert.deepEqual(splitName('acme:theora'), { namespace: 'acme', pkg: 'theora' });
+    assert.equal(shortName('acme:theora'), 'theora');
+    assert.equal(NAME_RE.test('acme:theora'), true);
+    assert.equal(NAME_RE.test('a:b:c'), false);
+    assert.equal(accessorFileName('acme:theora', 2), 'theora_2.wasm');
+  });
+});
