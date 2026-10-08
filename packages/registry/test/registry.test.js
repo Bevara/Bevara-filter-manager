@@ -200,10 +200,22 @@ describe('registry', () => {
     assert.equal((await api('GET', '/-/whoami', { token: data.token })).status, 401);
   });
 
-  test('namespaces: users own their own, default namespace is reserved, first publisher claims a new one', async () => {
-    let r = await publish(api, bob, manifest({ name: 'bobthing' }));
-    assert.equal(r.status, 403);                     // bob is not an admin: cannot create in "bevara:"
-    assert.match(r.data.error, /bob:bobthing/);
+  test('namespaces: the default one is open to any account, users own their own, first publisher claims a new one', async () => {
+    // bob is not an administrator, yet publishes a new filter with a bare name.
+    let r = await publish(api, bob, manifest({ name: 'bobfree' }));
+    assert.equal(r.status, 201, JSON.stringify(r.data));
+    assert.equal(r.data.name, 'bevara:bobfree');
+    assert.deepEqual((await api('GET', '/filters/bobfree')).data.owners, ['bob']);
+    // ...which then belongs to him: another account cannot push a version of it.
+    const carl = await signup(api, 'carl');
+    r = await publish(api, carl, manifest({ name: 'bobfree', version: '1.1.0' }));
+    assert.equal(r.status, 403);
+    assert.match(r.data.error, /bevara:bobfree belongs to bob: only its owners publish new versions/);
+    assert.match(r.data.hint, /bevara owner add carl bevara:bobfree/);
+    // A personal namespace stays personal.
+    r = await publish(api, carl, manifest({ name: 'bob:carlthing' }));
+    assert.equal(r.status, 403);
+    assert.match(r.data.hint, /bare name: "carlthing"/);
     r = await publish(api, bob, manifest({ name: 'bob:bobthing' }));
     assert.equal(r.status, 201);
     assert.equal(r.data.name, 'bob:bobthing');
@@ -338,6 +350,62 @@ describe('registry opened on an older database', () => {
       // The first publisher keeps the name: a new version of the other is refused.
       const holder = reg.app.db.prepare("SELECT name FROM accessor_names WHERE key = 'clash'").get().name;
       assert.equal(holder, 'erin:clash');
+    } finally { await reg.close(); }
+  });
+});
+
+describe('administrators and namespaces on an existing registry', () => {
+  const fileRegistry = async (dataDir, config = {}) => startRegistry({ dataDir, dbFile: path.join(dataDir, 'registry.sqlite'), ...config });
+
+  test('ADMIN_USERS promotes an account that already exists', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-admins-'));
+    let reg = await fileRegistry(dataDir);
+    await signup(reg.api, 'first');                       // first account: admin
+    const tok = await signup(reg.api, 'gorinje');         // created as a plain user
+    assert.equal((await reg.api('GET', '/-/whoami', { token: tok })).data.role, 'user');
+    await new Promise((r) => reg.app.server.close(r)); reg.app.db.close();
+
+    reg = await fileRegistry(dataDir, { adminUsers: ['gorinje'] });
+    try {
+      assert.equal((await reg.api('GET', '/-/whoami', { token: tok })).data.role, 'admin');
+      // and may publish in the default namespace
+      assert.equal((await publish(reg.api, tok, manifest({ name: 'official' }))).status, 201);
+    } finally { await reg.close(); }
+  });
+
+  test('reading needs no account; publishing needs one, and nothing else', async () => {
+    const reg = await startRegistry();
+    try {
+      await signup(reg.api, 'root');                                  // first account, admin
+      const dev = await signup(reg.api, 'dev');                       // an ordinary account
+      assert.ok((await reg.api('GET', '/-/namespaces')).data.namespaces.some((n) => n.name === 'bevara'));
+      assert.equal((await publish(reg.api, dev, manifest({ name: 'anyone' }))).status, 201);
+      // Anonymous: every read works, publishing does not.
+      for (const p of ['/', '/-/ping', '/filters', '/filters/anyone', '/filters/anyone/1.0.0', '/accessors/index.json',
+        '/accessors/filter_list.json', '/accessors/anyone_1.wasm', '/filters/anyone/-/anyone-1.0.0.tgz',
+        '/-/namespaces', '/-/advisories', '/-/log', '/-/log/checkpoint', '/-/log/1']) {
+        assert.equal((await reg.api('GET', p)).status, 200, p);
+      }
+      assert.equal((await reg.api('POST', '/-/audit', { body: { filters: { anyone: '1.0.0' } } })).status, 200);
+      assert.equal((await publish(reg.api, null, manifest({ name: 'anon' }))).status, 401);
+    } finally { await reg.close(); }
+  });
+
+  test('accounts created before namespaces get their own at start-up, but never the default one', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-own-ns-'));
+    let reg = await fileRegistry(dataDir);
+    await signup(reg.api, 'first');
+    const old = await signup(reg.api, 'oldtimer');
+    reg.app.auth.createUser({ name: 'bevara', password: 'password123' });   // an account named like the default namespace
+    reg.app.db.exec("DELETE FROM namespace_owners; DELETE FROM namespaces;"); // as on a registry older than namespaces
+    await new Promise((r) => reg.app.server.close(r)); reg.app.db.close();
+
+    reg = await fileRegistry(dataDir);
+    try {
+      const { data } = await reg.api('GET', '/-/whoami', { token: old });
+      assert.deepEqual(data.namespaces, ['oldtimer']);
+      const ns = (await reg.api('GET', '/-/namespaces')).data.namespaces;
+      assert.deepEqual(ns.find((n) => n.name === 'bevara').owners, [], 'the account "bevara" does not own the default namespace');
     } finally { await reg.close(); }
   });
 });

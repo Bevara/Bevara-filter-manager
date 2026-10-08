@@ -34,7 +34,7 @@ spec:
         fsGroup: 1000              # "node" user in the image
       containers:
         - name: registry
-          image: 192.168.1.120:32000/bevara-registry:1.2.0
+          image: 192.168.1.120:32000/bevara-registry:1.2.2
           imagePullPolicy: Always
           ports:
             - name: http
@@ -49,9 +49,10 @@ spec:
             # Set to "false" once your users exist (or when OIDC is on) to close self-registration.
             - name: ALLOW_SIGNUP
               value: "true"
-            # Comma-separated usernames granted the admin role (advisories, any filter).
+            # Comma-separated usernames granted the admin role (advisories, any filter,
+            # the default namespace). Applied at start-up, to existing accounts too.
             - name: ADMIN_USERS
-              value: "admin"
+              value: "admin,gorinje"
             - name: MAX_TARBALL_BYTES
               value: "268435456"
             # Namespace used for bare names ("theora" -> "bevara:theora"); only admins create packages in it.

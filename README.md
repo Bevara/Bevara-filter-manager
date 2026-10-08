@@ -99,6 +99,9 @@ bevara build                # emcmake cmake -S . -B .bevara/.build && cmake --bu
 bevara publish
 ```
 
+Anyone can browse and install without an account. Any authenticated account can
+publish: a bare name goes to the default namespace (`bevara:`) and makes you the
+owner of that package; only its owners publish new versions of it afterwards.
 Accessor names are unique on a registry: once `bevara:theora` provides
 `theora_1.wasm`, no other package can (see [docs/PACKAGE_FORMAT.md](docs/PACKAGE_FORMAT.md)).
 

@@ -18,11 +18,12 @@ const app = createApp({
 });
 
 // Bootstrap an admin account from the environment (used by the k8s Secret).
+if (env.BOOTSTRAP_ADMIN_USER) app.auth.addAdmin(env.BOOTSTRAP_ADMIN_USER);
 if (env.BOOTSTRAP_ADMIN_USER && env.BOOTSTRAP_ADMIN_PASSWORD && !app.auth.getUser(env.BOOTSTRAP_ADMIN_USER)) {
-  app.auth.adminUsers.add(env.BOOTSTRAP_ADMIN_USER);
   app.auth.createUser({ name: env.BOOTSTRAP_ADMIN_USER, password: env.BOOTSTRAP_ADMIN_PASSWORD });
   console.log(`created bootstrap admin user "${env.BOOTSTRAP_ADMIN_USER}"`);
 }
+console.log(`administrators: ${[...app.auth.adminUsers].join(', ') || '(the first account only)'}`);
 
 app.server.listen(port, host, () => {
   console.log(`${app.config.name} listening on http://${host}:${port} (data: ${app.config.dataDir}, oidc: ${app.config.oidc ? app.config.oidc.issuer : 'off'}, registry key: ${app.ledger.keyId}, signatures ${app.config.requireSignatures ? 'required' : 'optional'})`);

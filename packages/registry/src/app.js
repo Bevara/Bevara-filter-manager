@@ -50,6 +50,16 @@ export function createApp(config = {}) {
   // "theora_1.wasm" -> "theora": the name a page uses, without its generation, any case.
   const accessorKey = (wasmFile) => wasmFile.replace(/_\d+\.wasm$/, '').toLowerCase();
 
+  /* Namespaces that must exist whatever happened before: the default one, so
+   * that administrators can grant it (bevara namespace add <user> bevara), and
+   * each account's own, which accounts created before namespaces lacked. */
+  db.prepare('INSERT OR IGNORE INTO namespaces (name, created_by) VALUES (?, ?)').run(cfg.defaultNamespace, 'registry');
+  for (const u of db.prepare('SELECT id, name FROM users').all()) {
+    if (!PART_RE.test(u.name) || u.name === cfg.defaultNamespace) continue;
+    db.prepare('INSERT OR IGNORE INTO namespaces (name, created_by) VALUES (?, ?)').run(u.name, u.name);
+    db.prepare('INSERT OR IGNORE INTO namespace_owners (namespace, user_id) VALUES (?, ?)').run(u.name, u.id);
+  }
+
   /* Registries created before accessor names were reserved: fill the table
    * from what is published, and report clashes that already exist (the first
    * publisher keeps the name; the others keep working but are listed). */
@@ -73,7 +83,7 @@ export function createApp(config = {}) {
     if (!user) throw new HttpError(401, 'authentication required: run `bevara login`');
     return user;
   };
-  const isAdmin = (user) => user.role === 'admin';
+  const isAdmin = (user) => auth.isAdmin(user);
   const requireAdmin = (user) => { if (!isAdmin(user)) throw new HttpError(403, 'admin role required'); };
   const isOwner = (name, user) => isAdmin(user) || !!db.prepare('SELECT 1 FROM owners WHERE name = ? AND user_id = ?').get(name, user.id);
   const requireOwner = (name, user) => { if (!isOwner(name, user)) throw new HttpError(403, `you are not an owner of "${name}"`); };
@@ -167,8 +177,9 @@ export function createApp(config = {}) {
 
   // ------------------------------------------------------------ accounts
   const claimOwnNamespace = (user) => {
-    // Each user owns the namespace named after them (like npm scopes).
-    if (!PART_RE.test(user.name)) return;
+    // Each user owns the namespace named after them (like npm scopes) - except
+    // the default namespace, which only administrators hand out.
+    if (!PART_RE.test(user.name) || user.name === cfg.defaultNamespace) return;
     db.prepare('INSERT OR IGNORE INTO namespaces (name, created_by) VALUES (?, ?)').run(user.name, user.name);
     db.prepare('INSERT OR IGNORE INTO namespace_owners (namespace, user_id) VALUES (?, ?)').run(user.name, user.id);
   };
@@ -419,16 +430,28 @@ export function createApp(config = {}) {
     const wasmSha = sha256(wasm).toString('hex');
     const tarSha = sha256(tarball).toString('hex');
 
-    // Namespace and package ownership.
+    /* Who may publish what. Reading needs no account; publishing does, and:
+     *  - the default namespace is open: any authenticated account may publish
+     *    a new filter in it, and becomes that package's owner;
+     *  - a package, once published, takes new versions from its owners only
+     *    (and administrators) - otherwise any account could replace a decoder
+     *    every page links;
+     *  - other namespaces belong to their owners (an account owns its own). */
     const nsRow = db.prepare('SELECT 1 FROM namespaces WHERE name = ?').get(namespace);
     const existing = q.filter.get(name);
     if (existing) {
-      requireOwner(name, user);
+      if (!isOwner(name, user)) {
+        const owners = q.owners.all(name).map((o) => o.name);
+        throw new HttpError(403, `${name} belongs to ${owners.join(', ')}: only its owners publish new versions`, {
+          hint: `ask one of them to add you (bevara owner add ${user.name} ${name}), or publish your own filter under another name`,
+        });
+      }
       if (q.version.get(name, version)) throw new HttpError(409, `${name}@${version} is already published; bump the version`);
-    } else if (nsRow) {
-      if (!ownsNamespace(namespace, user)) throw new HttpError(403, `namespace "${namespace}" belongs to ${q.nsOwners.all(namespace).map((o) => o.name).join(', ')}; publish under "${user.name}:${shortName(name)}" or ask for access`);
-    } else if (namespace !== user.name && !isAdmin(user) && namespace === cfg.defaultNamespace) {
-      throw new HttpError(403, `the default namespace "${namespace}" is reserved; publish under "${user.name}:${shortName(name)}"`);
+    } else if (nsRow && namespace !== cfg.defaultNamespace && !ownsNamespace(namespace, user)) {
+      const owners = q.nsOwners.all(namespace).map((o) => o.name);
+      throw new HttpError(403, `namespace "${namespace}" belongs to ${owners.join(', ') || 'the administrators'}`, {
+        hint: `one of them can add you (bevara namespace add ${user.name} ${namespace}), or publish it in the default namespace with a bare name: "${shortName(name)}"`,
+      });
     }
 
     // Signature: the record must describe exactly this upload.

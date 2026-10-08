@@ -246,11 +246,15 @@ $BEVARA publish -y
 $BEVARA unpublish dummy@1.2.0 -y
 $BEVARA log | grep -q yanked
 
-step "namespaces: bob cannot create in bevara:, can publish as bob:, chain still verifies"
+step "namespaces: any account publishes in bevara:, its own namespace stays its own, chain still verifies"
+# bob is not an administrator: a bare name still publishes, in the default namespace.
+mkdir -p "$WORK/bobopen" && cd "$WORK/bobopen"
+$BEVARA init -y -n bobopen
+mkdir -p build && cp "$FIXTURE" build/bobopen_1.wasm
+$BEVARA publish -y | grep 'bevara:bobopen@1.0.0' >/dev/null
 mkdir -p "$WORK/bobfilter" && cd "$WORK/bobfilter"
 $BEVARA init -y -n mine
 mkdir -p build && cp "$FIXTURE" build/mine_1.wasm
-expect_fail $BEVARA publish -y
 node -e "const f='mine.json',m=JSON.parse(require('fs').readFileSync(f));m.name='bob:mine';require('fs').writeFileSync(f,JSON.stringify(m,null,2))"
 $BEVARA publish -y | grep 'bob:mine@1.0.0' >/dev/null
 $BEVARA namespace ls | grep -q bob

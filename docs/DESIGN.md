@@ -184,11 +184,25 @@ the Bytecode Alliance registry protocol (Warg) and `wkg`, so packages could be
 mirrored to a component registry without renaming.
 
 **D3.2 — Who may publish where.**
-Every account owns the namespace of its user name; the first publisher of an
-unknown namespace claims it; only administrators create packages in the default
-namespace. Within a package, owners publish and can add co-owners.
-- *Why*: external contributions without letting anyone shadow the reference
-  accessors.
+Reading needs no account. Publishing needs one, and any account may publish a
+new filter in the default namespace (a bare name) — it becomes that package's
+owner. After that, a package takes new versions only from its owners (who can
+add co-owners) and from administrators; a personal namespace (`alice:`) belongs
+to its account; the first publisher of any other namespace claims it.
+- *Why open*: the registry is meant for external contributions; requiring an
+  administrator's grant before a first publish (the earlier rule) turned every
+  contributor away.
+- *What stays protected, and why*: an accessor runs inside every page that links
+  it. Letting any account push a new version of an existing package would let it
+  replace `theora_1.wasm` for everyone; ownership per package prevents that, and
+  publications are signed and logged (D4).
+- *Consequence*: names are first come, first served — in the default namespace
+  and for accessor names (D3.3). Administrators can remove a squatted package
+  (`bevara unpublish <name> --force`), which also frees its accessor name.
+- *Holds on an existing registry*: at start-up every account gets its own
+  namespace (accounts older than namespaces lacked one; an account named like the
+  default namespace does not get it), and `ADMIN_USERS` promotes the listed
+  accounts even if they already exist.
 
 **D3.3 — An accessor name belongs to one package, registry-wide.**
 The accessor name is the `.wasm` base name without its generation, lowercased.

@@ -27,6 +27,26 @@ export class Auth {
   constructor(db, { adminUsers = [] } = {}) {
     this.db = db;
     this.adminUsers = new Set(adminUsers);
+    this.promoteAdmins();
+  }
+
+  /* ADMIN_USERS names administrators whether their account predates the
+   * setting or not: an account created before (e.g. at a first single sign-on)
+   * is promoted when the registry starts. Accounts are never demoted here. */
+  promoteAdmins() {
+    const set = this.db.prepare("UPDATE users SET role = 'admin' WHERE name = ? AND role != 'admin'");
+    const promoted = [];
+    for (const name of this.adminUsers) if (set.run(name).changes) promoted.push(name);
+    return promoted;
+  }
+
+  addAdmin(name) {
+    this.adminUsers.add(name);
+    this.promoteAdmins();
+  }
+
+  isAdmin(user) {
+    return !!user && (user.role === 'admin' || this.adminUsers.has(user.name));
   }
 
   userCount() {

@@ -31,6 +31,7 @@ these requirements, and the alternatives rejected, are in
 | [R16](#r16) | No version in the manifest: it is the generation, already in CMake and the file name | 2026-10-07 |
 | [R17](#r17) | The licence is stated once, in a LICENCE file, never in the manifest | 2026-10-07 |
 | [R18](#r18) | `--build` builds under `.bevara/` by default, which repositories ignore in git | 2026-10-07 |
+| [R19](#r19) | Anyone reads the registry without an account; any authenticated account publishes filters | 2026-10-08 |
 
 ---
 
@@ -64,8 +65,8 @@ checkpoints pinned by each project and extended on every `audit`.
 ### R4
 **Package names are namespaced** (`bevara:theora`), following the Warg/wkg
 convention so packages stay addressable if mirrored to a component registry.
-The default namespace `bevara` is reserved to administrators; every account
-owns the namespace of its user name.
+The default namespace `bevara` is open to every authenticated account (R19);
+every account owns the namespace of its user name.
 
 - Where: `manifest.js` (`NAME_RE`, `fullName`), registry publish route
 - Checked by: `registry.test.js` "namespaces…", e2e step "namespaces"
@@ -181,3 +182,19 @@ leaves `git status` clean. `-B` still chooses another directory.
 
 - Where: `DEFAULT_BUILD_DIR` and `checkArtifact` in `cli/src/lib/pack.js`; template `.gitignore`
 - Checked by: `cli/test/project.test.js` (default command, lookup order, `-B`), e2e
+
+### R19
+**The registry is readable by everyone without an account, and every
+authenticated account can publish filters.** Browsing, searching, installing,
+downloading accessors, reading the log and auditing need no login. Publishing
+needs one, and nothing more: a bare name publishes in the default namespace,
+whoever the account is. Supersedes the earlier rule that reserved the default
+namespace to administrators (R4).
+
+What authentication still protects: a package, once published, takes new
+versions from its owners only (and administrators), and a personal namespace
+belongs to its account — otherwise any account could replace an accessor that
+pages already load.
+
+- Where: publish route in `registry/src/app.js` (reads never call `requireAuth`)
+- Checked by: `registry.test.js` "reading needs no account; publishing needs one, and nothing else", "namespaces: the default one is open to any account…", e2e step "namespaces"
