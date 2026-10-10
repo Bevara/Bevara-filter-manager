@@ -4,8 +4,11 @@ import { log, color, table, CliError } from '../lib/ui.js';
 import { clientFor, Project } from '../lib/ctx.js';
 import { sniff } from '../lib/sniff.js';
 import { readSource, isUrl } from '../lib/source.js';
-import { scanTags, getAttr, setAttributes, applyEdits, previewEdits } from '../lib/html.js';
+import { scanTags, getAttr, setAttributes, renameAttr, applyEdits, previewEdits } from '../lib/html.js';
 import { resolveTree, installResolved } from '../lib/resolve.js';
+import { needsOf, videoTailNeeds, resolvePipeline, pageSolver, describeNeed } from '../lib/capabilities.js';
+import { mediaTracks, closeMediaInfo } from '../lib/mediainfo.js';
+import { extensionOf } from '../lib/formats.js';
 
 export const options = {
   write: { type: 'boolean', short: 'w' },
@@ -20,7 +23,8 @@ export const options = {
 
 export const help = `Rewrites a page so its media elements go through the universal tags: each
 <img>, <audio>, <video> and <canvas> whose src can be identified gets the
-customised built-in element and the pipeline that decodes it.
+customised built-in element and the pipeline that decodes it. A <canvas> takes
+its source from data-url, as the player reads it; a src on it is renamed.
 
   <img src="photo.jxl">
   <img is="universal-img_1" src="photo.jxl" using="solver_minimal_1" with="libjxl_1">
@@ -43,7 +47,8 @@ Options:
   --attrs "a b"      extra attributes to set, e.g. "progressive use-worker use-cache"
   --scripts <base>   where the universal-*.js scripts live (default: scripts/)
   --no-scripts       do not add the <script> tags for the universal elements
-  --offline          do not check the accessors against the registry
+  --offline          use the built-in accessor names, unchecked: they may name
+                     accessors nobody has published
   --json             machine-readable report`;
 
 const MEDIA_TAGS = new Set(['img', 'audio', 'video', 'canvas']);
@@ -61,7 +66,6 @@ export async function run({ args, opts }) {
     try { index = await client.get('/accessors/index.json'); }
     catch (e) { log.warn(`registry unreachable (${e.message}); accessors will not be checked`); }
   }
-  const published = index ? new Set(index.filters.map((f) => f.file)) : null;
   const extra = (opts.attrs ?? '').split(/[\s;]+/).filter(Boolean);
   const scriptsBase = (opts.scripts ?? 'scripts/').replace(/\/*$/, '/');
 
@@ -76,28 +80,46 @@ export async function run({ args, opts }) {
     const dir = path.dirname(path.resolve(file));
     const edits = [];
     const needTags = new Set();
+    // Elements to rewrite, once the page's solver is known; and the solvers
+    // of universal elements left as they are.
+    const pending = [];
+    const present = new Set();
 
     for (const tag of scanTags(html)) {
       if (tag.name === 'source') { report.warnings.push('<source> children are not rewritten: the universal tags read "src" on the element itself'); continue; }
       if (!MEDIA_TAGS.has(tag.name)) continue;
-      const src = getAttr(tag, 'src')?.value;
+      // A universal canvas reads its source from data-url (canvas has no src);
+      // a <canvas src> written for it is renamed below.
+      const srcAttr = tag.name === 'canvas' ? (getAttr(tag, 'data-url') ? 'data-url' : 'src') : 'src';
+      const src = getAttr(tag, srcAttr)?.value;
       const line = html.slice(0, tag.start).split('\n').length;
       if (!src) { if (tag.name !== 'canvas') report.warnings.push(`line ${line}: <${tag.name}> has no src`); continue; }
       if (src.startsWith('data:') || src.startsWith('blob:')) continue;
       const already = getAttr(tag, 'is');
-      if (already && !opts.force) { report.elements.push({ line, tag: tag.name, src, skipped: `already ${already.value}` }); continue; }
+      if (already && !opts.force) {
+        const u = getAttr(tag, 'using')?.value;
+        if (u) present.add(u);
+        report.elements.push({ line, tag: tag.name, src, skipped: `already ${already.value}` });
+        continue;
+      }
 
-      let info;
+      let info, tracks, target;
       try {
-        const target = isUrl(src) ? src : path.resolve(dir, decodeURIComponent(src));
-        const { head, tail, size, mime } = await readSource(target);
-        info = sniff({ head, tail, name: target, mime, size });
+        target = isUrl(src) ? src : path.resolve(dir, decodeURIComponent(src));
+        const source = await readSource(target);
+        info = sniff({ head: source.head, tail: source.tail, name: target, mime: source.mime, size: source.size });
+        tracks = await mediaTracks(target, source);
       } catch (e) {
         const why = /ENOENT/.test(e.message) ? 'file not found' : e.message.replace(/^cannot fetch \S+: /, '');
         report.elements.push({ line, tag: tag.name, src, skipped: why });
         continue;
       }
-      if (!info.format || !info.with.length) { report.elements.push({ line, tag: tag.name, src, skipped: 'format not identified' }); continue; }
+      // MediaInfo knows formats the built-in table does not, and the other way round.
+      const general = tracks?.find((t) => t['@type'] === 'General');
+      const kind = ['Video', 'Image', 'Audio'].map((t) => tracks?.some((x) => x['@type'] === t) && t.toLowerCase()).find(Boolean) ?? info.kind;
+      if (!info.format && !general?.Format) { report.elements.push({ line, tag: tag.name, src, skipped: 'format not identified' }); continue; }
+      if (!index && !info.with.length) { report.elements.push({ line, tag: tag.name, src, skipped: 'no built-in pipeline for this format (drop --offline to ask the registry)' }); continue; }
+      info = { ...info, kind, format: info.format ?? general.Format };
       if (opts['non-native'] && info.native) { report.elements.push({ line, tag: tag.name, src, skipped: `${info.format} is decoded natively by some engines` }); continue; }
 
       /* The customised built-in must match the element it extends: an <img>
@@ -109,20 +131,47 @@ export async function run({ args, opts }) {
         report.elements.push({ line, tag: tag.name, src, skipped: `${info.format} is ${info.kind}: use <${expected}> (or <canvas>) for this source` });
         continue;
       }
+      // With a registry, the accessors are the published ones that declare what
+      // the file needs; a page is not pointed at modules nobody has published.
+      // A <video> plays what was decoded once it is remuxed and re-encoded.
+      const needs = index ? [...needsOf(tracks, { ext: extensionOf(target) }), ...(tag.name === 'video' ? videoTailNeeds() : [])] : null;
       const element = tag.name === 'canvas' ? 'canvas' : tag.name;
+      const pipeline = index ? resolvePipeline(needs, index, { prefer: element === 'canvas' ? 'solver_1' : info.using }) : null;
+      if (pipeline?.missing.length) {
+        report.elements.push({ line, tag: tag.name, src, format: info.format, skipped: `nothing on this registry can ${pipeline.missing.map(describeNeed).join(', ')}` });
+        continue;
+      }
+      if (pipeline?.conflict) {
+        report.elements.push({ line, tag: tag.name, src, format: info.format, skipped: `no solver links all its accessors: ${pipeline.conflict.map((c) => `${c.module} needs ${c.using.join(' or ')}`).join(', ')}` });
+        continue;
+      }
+      pending.push({ tag, srcAttr, line, src, info, element, pipeline });
+    }
+
+    /* One solver per page: the loader keeps the first one it loads. Take one
+     * that every element's accessors link against; failing that, each keeps
+     * its own and the page is flagged. */
+    const pipelines = pending.map((p) => p.pipeline).filter(Boolean);
+    const shared = pipelines.length ? pageSolver(pipelines, [...present]) : null;
+    for (const p of pending) {
+      const { tag, srcAttr, line, src, info, element, pipeline } = p;
+      const using = pipeline ? (shared ?? pipeline.using) : info.using;
+      const withList = pipeline ? (shared ? pipeline.bySolver.get(shared).with : pipeline.with) : info.with;
       const is = `universal-${element}_1`;
       needTags.add(element);
 
-      const values = { is, using: info.using, with: info.with.join(';') };
+      const values = { is, using, with: withList.join(';') };
       for (const a of extra) values[a] = null;      // boolean attributes: progressive, use-worker…
-      const tagEdits = setAttributes(html, tag, values);
+      const tagEdits = [...setAttributes(html, tag, values), ...(srcAttr === 'src' && tag.name === 'canvas' ? renameAttr(tag, 'src', 'data-url') : [])];
       edits.push(...tagEdits);
-      for (const m of info.with) allModules.add(m);
-      const missing = published ? info.with.filter((m) => !published.has(`${m}.wasm`)) : [];
+      for (const m of withList) allModules.add(m);
       report.elements.push({ line, tag: tag.name, src, format: info.format, kind: info.kind, native: info.native,
-        streams: info.streams.map((s) => `${s.type}/${s.codec ?? '?'}`), is, using: info.using, with: info.with, missing,
+        streams: info.streams.map((s) => `${s.type}/${s.codec ?? '?'}`), is, using, with: withList,
         changed: tagEdits.length > 0 });
     }
+    const solvers = new Set([...present, ...report.elements.filter((e) => e.using).map((e) => e.using)]);
+    if (solvers.size > 1) report.warnings.push(`this page loads several solvers (${[...solvers].join(', ')}): only the first one loaded is kept, so the elements asking for another fail`);
+    report.elements.sort((a, b) => a.line - b.line);
 
     // The customised elements do nothing unless their definition is loaded.
     if (!opts['no-scripts'] && needTags.size) {
@@ -154,6 +203,7 @@ export async function run({ args, opts }) {
     return;
   }
 
+  await closeMediaInfo();
   for (const r of reports) print(r, opts, registry);
 
   const touched = reports.filter((r) => r.changed);
@@ -195,7 +245,6 @@ function print(r, opts, registry) {
     if (e.skipped) { console.log(`  ${color.dim('·')} ${String(e.line).padStart(4)} ${color.dim(`<${e.tag}> ${e.src} — ${e.skipped}`)}`); continue; }
     console.log(`  ${color.green('→')} ${String(e.line).padStart(4)} <${e.tag}> ${e.src}  ${color.bold(e.format)} ${color.dim(e.streams.join(' + '))}`);
     console.log(`         ${color.dim(`is="${e.is}" using="${e.using}" with="${e.with.join(';')}"`)}`);
-    if (e.missing?.length) log.warn(`       not published on ${registry}: ${e.missing.join(', ')}`);
   }
   if (r.scripts.length) console.log(`  ${color.green('+')} ${r.scripts.map((s) => `<script src="${s}">`).join(', ')}`);
   for (const w of r.warnings) log.warn('  ' + w);

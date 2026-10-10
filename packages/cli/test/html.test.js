@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { scanTags, getAttr, setAttributes, applyEdits, previewEdits } from '../src/lib/html.js';
+import { scanTags, getAttr, setAttributes, renameAttr, applyEdits, previewEdits } from '../src/lib/html.js';
 
 const names = (html) => scanTags(html).map((t) => t.name);
 const edit = (html, pick, values) => {
@@ -86,6 +86,14 @@ describe('html editing', () => {
     const tags = scanTags(html);
     const edits = tags.flatMap((t, i) => setAttributes(html, t, { 'data-i': String(i) }));
     assert.equal(applyEdits(html, edits), '<img src="1.png" data-i="0"><img src="2.png" data-i="1"><img src="3.png" data-i="2">');
+  });
+
+  test('an attribute is renamed in place, with its value and quoting', () => {
+    const html = "<canvas SRC='a.ogv' width=640>";
+    const tag = scanTags(html)[0];
+    const edits = [...setAttributes(html, tag, { is: 'universal-canvas_1' }), ...renameAttr(tag, 'src', 'data-url')];
+    assert.equal(applyEdits(html, edits), "<canvas data-url='a.ogv' width=640 is=\"universal-canvas_1\">");
+    assert.deepEqual(renameAttr(tag, 'href', 'x'), []);
   });
 });
 

@@ -37,17 +37,44 @@ export function formatBytes(n) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/* A single line rewritten in place: "label  42% ███░░░". On a non-TTY stderr
+ * nothing is drawn until done(), which prints the final line once. */
+export function progress(label) {
+  const live = process.stderr.isTTY;
+  const width = 24;
+  let last = -1;
+  const draw = (pct, suffix = '') => {
+    const filled = Math.round((pct / 100) * width);
+    process.stderr.write(`\r\x1b[2K${color.dim('→')} ${label} ${String(pct).padStart(3)}% ${color.cyan('█'.repeat(filled))}${color.dim('░'.repeat(width - filled))}${suffix}`);
+  };
+  return {
+    update(done, total) {
+      const pct = total ? Math.min(100, Math.floor((done / total) * 100)) : 0;
+      if (!live || pct === last) return;
+      last = pct;
+      draw(pct, pct === 100 ? color.dim('  waiting for the registry…') : '');
+    },
+    done() {
+      if (live) { draw(100); process.stderr.write('\n'); }
+      else log.step(`${label} 100%`);
+    },
+    fail() { if (live && last >= 0) process.stderr.write('\n'); },
+  };
+}
+
 export async function prompt(question, { default: def, hidden = false, validate } = {}) {
   const muted = new Writable({ write(chunk, enc, cb) { if (!this.muted) process.stdout.write(chunk, enc); cb(); } });
   const rl = readline.createInterface({ input: process.stdin, output: hidden ? muted : process.stdout, terminal: true });
   try {
     for (;;) {
       const label = def !== undefined && !hidden ? `${question} ${color.dim(`(${def})`)}: ` : `${question}: `;
-      process.stdout.write(label);
-      muted.muted = hidden;
       const answer = await new Promise((resolve, reject) => {
         rl.once('close', () => reject(new CliError('no input available for the prompt', { hint: 'pass values with flags (e.g. -u/-e) or BEVARA_PASSWORD for non-interactive use' })));
-        rl.question('', resolve);
+        // The label goes through readline: written before, it is erased when
+        // readline draws its own (empty) prompt, leaving a blank line that waits.
+        muted.muted = false;
+        rl.question(label, resolve);
+        muted.muted = hidden;
       });
       if (hidden) process.stdout.write('\n');
       const value = answer.trim() === '' && def !== undefined ? def : answer.trim();

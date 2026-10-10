@@ -102,6 +102,12 @@ export function applyEdits(html, edits) {
   return out;
 }
 
+/* Renames an attribute in place, keeping its value and quoting. */
+export function renameAttr(tag, from, to) {
+  const a = getAttr(tag, from);
+  return a ? [{ start: a.start, end: a.start + from.length, text: to }] : [];
+}
+
 /* Sets attributes on a tag: existing ones are replaced in place (keeping their
  * quoting), new ones are appended just before the closing ">". A value of null
  * writes a boolean attribute with no value. */

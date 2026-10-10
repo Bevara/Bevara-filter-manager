@@ -3,6 +3,7 @@ import http from 'node:http';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import semver from 'semver';
+import { normalizeQuery, selectAccessors } from './select.js';
 import { openDb } from './db.js';
 import { Auth } from './auth.js';
 import { Oidc } from './oidc.js';
@@ -375,11 +376,50 @@ export function createApp(config = {}) {
     await sendFile(req, res, store.path(row.name, row.version, row.wasm_file), 'application/wasm', { ...wasmHeaders, 'cache-control': 'public, max-age=31536000, immutable', 'x-bevara-version': row.version });
   });
 
-  router.get('/accessors/index.json', (req, res) => {
+  // The latest version of every filter that is not deprecated, as players and
+  // the selector see it.
+  const indexEntries = (req) => {
     const base = baseUrl(req);
-    const filters = db.prepare('SELECT v.* FROM filters f JOIN versions v ON v.name = f.name AND v.version = f.latest WHERE f.deprecated IS NULL ORDER BY f.name').all()
-      .map((r) => { const m = JSON.parse(r.manifest); const info = r.wasm_info ? JSON.parse(r.wasm_info) : {}; return { name: r.name, version: r.version, abi: r.abi, file: r.wasm_file, url: `${base}/accessors/${encodeURIComponent(r.name)}/${r.version}/${r.wasm_file}`, filters: m.filters, support: m.support, formats: m.formats, inputs: m.inputs, outputs: m.outputs, priority: m.priority, license: m.license, licence_required: !!m.licence_required, georestrictions: m.georestrictions, dependencies: m.dependencies, size: r.wasm_size, brSize: r.wasm_br_size, integrity: 'sha256-' + b64(r.wasm_sha256), keyId: info.signature?.keyId, logSeq: info.signature?.logSeq }; });
-    json(res, 200, { registry: base, generated: new Date().toISOString(), checkpoint: ledger.checkpoint(), filters }, wasmHeaders);
+    return db.prepare('SELECT v.* FROM filters f JOIN versions v ON v.name = f.name AND v.version = f.latest WHERE f.deprecated IS NULL ORDER BY f.name').all()
+      .map((r) => { const m = JSON.parse(r.manifest); const info = r.wasm_info ? JSON.parse(r.wasm_info) : {}; return { name: r.name, version: r.version, abi: r.abi, file: r.wasm_file, url: `${base}/accessors/${encodeURIComponent(r.name)}/${r.version}/${r.wasm_file}`, filters: m.filters, support: m.support, formats: m.formats, extension: m.extension, using: m.using, inputs: m.inputs, outputs: m.outputs, priority: m.priority, caps: m.caps, projects: m.projects, language: m.language ?? 'wasm', license: m.license, licence_required: !!m.licence_required, georestrictions: m.georestrictions, dependencies: m.dependencies, size: r.wasm_size, brSize: r.wasm_br_size, integrity: 'sha256-' + b64(r.wasm_sha256), keyId: info.signature?.keyId, logSeq: info.signature?.logSeq }; });
+  };
+
+  router.get('/accessors/index.json', (req, res) => {
+    json(res, 200, { registry: baseUrl(req), generated: new Date().toISOString(), checkpoint: ledger.checkpoint(), filters: indexEntries(req) }, wasmHeaders);
+  });
+
+  // Capability-driven selection (paper, Section 5): every accessor whose
+  // declared inputs satisfy the query's, under its side conditions. POST takes
+  // the query as the body; GET as ?query=<JSON> or as plain parameters
+  // (?pixfmt=rgba&maxpriority=50), for a player that cannot POST.
+  const runSelect = (req, res, query) => {
+    let q;
+    try { q = normalizeQuery(query); } catch (e) { throw new HttpError(400, `invalid query: ${e.message}`, { hint: 'see docs/REGISTRY_API.md, "Selection"' }); }
+    const { matches, excluded, uncharacterised } = selectAccessors(indexEntries(req), q);
+    json(res, 200, { query: q, total: matches.length, matches, excluded, uncharacterised }, wasmHeaders);
+  };
+  router.post('/-/select', async (req, res) => {
+    const body = await readBody(req, { limit: 64 * 1024 });
+    let query;
+    try { query = JSON.parse(body.toString('utf8') || '{}'); } catch { throw new HttpError(400, 'the body must be the query as JSON'); }
+    runSelect(req, res, query);
+  });
+  router.get('/-/select', (req, res, { url }) => {
+    const p = url.searchParams;
+    if (p.has('query')) {
+      let query;
+      try { query = JSON.parse(p.get('query')); } catch { throw new HttpError(400, '"query" must be JSON'); }
+      return runSelect(req, res, query);
+    }
+    const inputs = [];
+    for (const [k, v] of p) if (!['maxpriority', 'version', 'projectname', 'project', 'language', 'maxsize', 'license', 'geocode', 'filter', 'output'].includes(k)) inputs.push({ property: k, format: v });
+    runSelect(req, res, {
+      inputs, outputs: p.getAll('output').map((o) => { const [property, format] = o.split('='); return { property, format }; }),
+      version: p.get('version'), projectname: p.get('projectname') ?? p.get('project'), language: p.get('language'), filter: p.get('filter'),
+      maxpriority: p.get('maxpriority'),
+      size: p.has('maxsize') ? { condition: true, maxsize: p.get('maxsize') } : undefined,
+      IP: p.has('license') || p.has('geocode') ? { condition: true, license: p.get('license'), geocode: p.get('geocode') } : undefined,
+    });
   });
 
   // Same shape as filters/filter_list.json in the Bevara filters repository.
@@ -678,7 +718,7 @@ export function createApp(config = {}) {
   async function handle(req, res) {
     const url = new URL(req.url, 'http://x');
     if (req.method === 'OPTIONS') {
-      res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,HEAD,OPTIONS', 'access-control-allow-headers': 'authorization,content-type', 'access-control-max-age': '86400' });
+      res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-methods': url.pathname === '/-/select' ? 'GET,POST,OPTIONS' : 'GET,HEAD,OPTIONS', 'access-control-allow-headers': 'authorization,content-type', 'access-control-max-age': '86400' });
       return res.end();
     }
     const m = router.match(req.method, url.pathname);

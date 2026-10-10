@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { log, color, table, formatBytes, confirm, CliError } from '../lib/ui.js';
+import { log, color, table, formatBytes, confirm, progress, CliError } from '../lib/ui.js';
 import { clientFor, requireLogin, Project } from '../lib/ctx.js';
 import { createHash } from 'node:crypto';
 import { packFilter, buildFilter } from '../lib/pack.js';
@@ -8,7 +8,6 @@ import { RegistryError, assertRegistryVersion } from '../lib/registry-client.js'
 import { ensureKey } from './key.js';
 import { signRecord, canonicalize } from '../lib/sig.js';
 import { accessorFileName, inspectWasm } from '../lib/wasm.js';
-import { getKey } from '../lib/config.js';
 
 export const options = { build: { type: 'boolean', short: 'b' }, 'build-dir': { type: 'string', short: 'B' }, 'dry-run': { type: 'boolean' }, tag: { type: 'string' }, 'no-sign': { type: 'boolean' } };
 export const help = `Packs the filter in the current directory - its manifest (libjxl.json in the
@@ -54,6 +53,8 @@ export async function run({ args, opts }) {
   if (m.derived?.version) console.log(color.dim(`  version ${m.version} = generation ${m.abi}, from ${m.derived.generation ?? 'the default'}`));
   console.log(color.dim(`  module ${m.main}`));
   if (m.derived?.license) console.log(color.dim(`  licence ${m.license}, from ${m.derived.license}`));
+  if (m.derived?.caps) console.log(color.dim(`  capabilities of ${m.caps.map((c) => `${c.filter} (priority ${c.priority})`).join(', ')}, from ${m.derived.caps}`));
+  if (m.derived?.projects) console.log(color.dim(`  projects ${m.projects.join(', ')}, from ${m.derived.projects}`));
   console.log(table(r.entries.map((e) => [color.dim(e.path), formatBytes(e.size)]), { indent: '  ' }));
   console.log(`  ${color.dim('tarball')} ${formatBytes(r.size)}`);
   try {
@@ -65,7 +66,9 @@ export async function run({ args, opts }) {
     const tarball = fs.readFileSync(r.tgzPath);
     const headers = { 'content-type': 'application/gzip' };
     if (!opts['no-sign']) {
-      const key = getKey(registry) ?? await ensureKey(client, registry);
+      // Registering is idempotent: it also repairs a key the registry no longer
+      // knows (a reset database, another registry behind the same URL).
+      const key = await ensureKey(client, registry);
       const wasmFile = accessorFileName(m.name, m.abi, m.module);
       const record = {
         type: 'publish', name: fullName, version: m.version, abi: m.abi, file: wasmFile,
@@ -77,9 +80,12 @@ export async function run({ args, opts }) {
       headers['x-bevara-signature'] = signRecord(record, key.privateKey);
     } else if (info.requireSignatures) log.warn('this registry requires signatures; the upload will be refused');
     let res;
+    const bar = progress(`upload ${formatBytes(tarball.length)}`);
     try {
-      res = await client.put(`/filters/${encodeURIComponent(fullName)}/${encodeURIComponent(m.version)}`, tarball, { headers });
+      res = await client.put(`/filters/${encodeURIComponent(fullName)}/${encodeURIComponent(m.version)}`, tarball, { headers, onProgress: bar.update });
+      bar.done();
     } catch (e) {
+      bar.fail();
       // 409 covers two different conflicts: only a version clash is fixed by bumping it.
       if (e instanceof RegistryError && e.status === 409 && /already published/.test(e.message)) {
         e.hint = m.derived?.version
@@ -87,7 +93,7 @@ export async function run({ args, opts }) {
           : `bump "version" in ${project.manifestName}`;
       }
       if (e instanceof RegistryError && e.status === 401) e.hint = 'run `bevara login`';
-      if (e instanceof RegistryError && /signing key/.test(e.message)) e.hint = 'run `bevara key register`';
+      if (e instanceof RegistryError && /signing key/.test(e.message)) e.hint = /revoked|another user/.test(e.message) ? 'run `bevara key generate --force`' : 'run `bevara key register`';
       throw e;
     }
     for (const w of res.warnings ?? []) if (!(project.manifestWarnings ?? []).includes(w)) log.warn(w);

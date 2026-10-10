@@ -7,6 +7,7 @@ import { inspectWasm, accessorFileName } from './wasm.js';
 import { validateManifest, normalizeManifest, fromLegacy, shortName } from './manifest.js';
 import { addFilterFor } from './cmake.js';
 import { licenceFromRepository, LICENCE_FILES } from './license.js';
+import { extractCaps, projectsOf } from './caps.js';
 import { activeEmsdk, expectedEmsdk, resetIfOtherToolchain, diagnoseBuildFailure, sdkOf } from './emsdk.js';
 import { CliError, log, color } from './ui.js';
 
@@ -85,6 +86,28 @@ export function filterManifest(project, { buildDir: requested } = {}) {
   } else if (m.license !== undefined && lic && lic.how !== 'fallback' && lic.spdx !== m.license) {
     derived.notes.push(`"license" in ${project.manifestName} (${m.license}) differs from ${path.basename(lic.file)} (${lic.spdx}); the manifest wins - better keep the licence in one place`);
   }
+
+  // What the filters accept and produce, from their C source (caps.js); the
+  // manifest's "runtime" completes what the source decides at run time.
+  if (m.caps === undefined && Array.isArray(m.filters)) {
+    const found = extractCaps(project.root, m);
+    derived.capsReport = found;
+    if (found.caps.length) {
+      m.caps = found.caps;
+      derived.caps = [...new Set(found.caps.map((c) => c.source))].join(', ');
+      m.priority ??= Math.min(...found.caps.map((c) => c.priority));
+    }
+    for (const f of found.missing) derived.notes.push(`no GF_FilterRegister named "${f}" in the sources: its capabilities are not published`);
+    for (const u of found.unresolved) {
+      derived.notes.push(`${u.filter} sets ${u.property} from ${u.expression} at run time (${u.file}:${u.line}): declare the formats in "runtime" (bevara caps --write)`);
+    }
+    derived.notes.push(...found.notes.filter((x) => !/ registers it as /.test(x)));
+  }
+  if (m.projects === undefined) {
+    if (typeof m.project === 'string') m.projects = [m.project];
+    else { m.projects = projectsOf(project.root); derived.projects = m.projects.length > 1 ? 'the libraries in lib/' : 'no third-party library in lib/'; }
+  }
+  m.language ??= 'wasm';
 
   const n = normalizeManifest(m);
   if (!n.main && n.name) {
@@ -200,7 +223,8 @@ export async function packFilter(project, { outDir = project.root, dryRun = fals
   const add = (rel, data) => { const dest = path.join(stage, rel); fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, data); entries.push({ path: `package/${rel}`, size: data.length }); };
 
   // Build-time keys and legacy aliases stay out of the published manifest.
-  const { main, mainDefaulted, mainCandidates, derived, scripts, accessorsDir, registry, Format, ...published } = m;
+  // "runtime" is folded into "caps"; "project" into "projects".
+  const { main, mainDefaulted, mainCandidates, derived, scripts, accessorsDir, registry, Format, runtime, project: _project, ...published } = m;
   add('bevara.json', Buffer.from(JSON.stringify(published, null, 2) + '\n'));
   add(accessorFileName(m.name, m.abi, m.module), buf);
   const extra = new Set([...ALWAYS_INCLUDE, ...(m.files ?? [])]);

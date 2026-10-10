@@ -1,10 +1,12 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { log, color, table, formatBytes, CliError } from '../lib/ui.js';
 import { clientFor, Project } from '../lib/ctx.js';
 import { sniff } from '../lib/sniff.js';
+import { extensionOf } from '../lib/formats.js';
 import { readSource, HEAD_DEFAULT } from '../lib/source.js';
 import { resolveTree, installResolved } from '../lib/resolve.js';
+import { mediaTracks, closeMediaInfo } from '../lib/mediainfo.js';
+import { needsOf, resolveNeeds, resolvePipeline, describeNeed, elementFor } from '../lib/capabilities.js';
 
 export const options = {
   install: { type: 'boolean', short: 'i' },
@@ -13,10 +15,12 @@ export const options = {
   all: { type: 'boolean', short: 'a' },
 };
 
-export const help = `Identifies what a media file really contains - container, elementary streams and
-codecs - and reports the accessors needed to play it, checking each against the
-registry. Only the head and tail of the file are read, so probing a multi-gigabyte
-capture costs a few hundred kilobytes.
+export const help = `Identifies what a media file contains with MediaInfo - container and tracks -
+and picks the accessors that play it among those the registry carries, as the
+editor does: an accessor fits a track whose Format is in its "Format" list, or
+the file when its extension is one of its "extension" keys. A container or
+stream that no published accessor declares is reported as missing. The solver
+(using="…") is one every chosen accessor links against, from their "using".
 
   bevara probe movie.ogv
   bevara probe *.mp4 --json
@@ -26,96 +30,99 @@ capture costs a few hundred kilobytes.
 Options:
   -i, --install    install the matched accessors (needs a project and a registry)
   -b, --bytes <n>  head window to read, default 262144
-  -a, --all        also list accessors the registry offers for the same codecs
-  --offline        do not query the registry, report the built-in pipeline only
+  -a, --all        also list the other accessors that fit each need
+  --offline        do not query the registry: print the built-in suggestion,
+                   which may name accessors nobody has published
   --json           machine-readable report`;
-
-// "AC-3" / "JPEG 2000" / "h.264" all normalise to a comparable token.
-const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
-/* Matches what the file needs against the registry's capability index:
- * by accessor file name first (the names the pipeline actually loads), then
- * by declared capability for anything left over. */
-function matchRegistry(report, index) {
-  if (!index) return null;
-  const byFile = new Map(index.filters.map((f) => [f.file, f]));
-  const modules = report.with.map((m) => {
-    const entry = byFile.get(`${m}.wasm`);
-    return { module: m, entry: entry ?? null };
-  });
-  const covered = new Set();
-  for (const { entry } of modules) {
-    if (!entry) continue;
-    for (const f of entry.formats ?? []) covered.add(norm(f));
-    for (const cap of entry.inputs ?? []) if (cap.codec) covered.add(norm(cap.codec));
-  }
-  const alternatives = {};
-  for (const codec of report.required.decode) {
-    const hits = index.filters.filter((f) =>
-      (f.formats ?? []).some((x) => norm(x) === norm(codec)) ||
-      (f.inputs ?? []).some((c) => norm(c.codec) === norm(codec)) ||
-      (f.filters ?? []).some((x) => norm(x) === norm(codec)));
-    if (hits.length) alternatives[codec] = hits.sort((a, b) => (a.priority ?? 50) - (b.priority ?? 50));
-  }
-  return { modules, alternatives, covered };
-}
 
 async function probeOne(target, opts, index) {
   const headBytes = Math.max(4096, parseInt(opts.bytes ?? String(HEAD_DEFAULT), 10) || HEAD_DEFAULT);
-  const { head, tail, size, mime } = await readSource(target, headBytes);
-  if (!head.length) throw new CliError(`${target} is empty`);
-  const report = sniff({ head, tail, name: target, mime, size });
-  return { target, report, match: matchRegistry(report, index) };
+  const source = await readSource(target, headBytes);
+  if (!source.head.length) throw new CliError(`${target} is empty`);
+  const report = sniff({ head: source.head, tail: source.tail, name: target, mime: source.mime, size: source.size });
+  const tracks = await mediaTracks(target, source);
+  if (!index) return { target, report, tracks, match: null, element: elementFor(tracks, null, report.kind) };
+  const needs = needsOf(tracks, { ext: extensionOf(target) });
+  // The element decides the solver to prefer (a canvas uses solver_1, as in the
+  // editor); the accessors' "using" may then impose another.
+  const element = elementFor(tracks, resolveNeeds(needs, index), report.kind);
+  const match = resolvePipeline(needs, index, { prefer: element === 'canvas' ? 'solver_1' : report.using });
+  return { target, report, tracks, match, element };
 }
 
+const trackDetails = (t) => [
+  t.Format_Profile && `profile ${t.Format_Profile}`,
+  t.CodecID && `codec id ${t.CodecID}`,
+  t.Width && t.Height && `${t.Width}×${t.Height}`,
+  t.Channels && `${t.Channels} ch`,
+  t.SamplingRate && `${t.SamplingRate} Hz`,
+  t.Duration && `${Number(t.Duration).toFixed(1)} s`,
+].filter(Boolean).join(' · ');
+
 function print(result, opts, registry) {
-  const { target, report: r, match } = result;
+  const { target, report: r, tracks, match } = result;
   const name = path.basename(target.split('?')[0]);
+  const general = tracks?.find((t) => t['@type'] === 'General');
   console.log(`${color.bold(name)} ${color.dim(r.size != null ? formatBytes(r.size) : '')}`);
 
   const rows = [
-    ['format', r.format ? `${color.bold(r.format)}${r.mime ? color.dim(` (${r.mime})`) : ''}` : color.red('unrecognised')],
-    ['container', r.container ? r.container + (r.brands?.length ? color.dim(` · brands ${r.brands.filter(Boolean).join(', ')}`) : '') + (r.fragmented ? color.dim(' · fragmented') : '') : color.dim('none (elementary stream)')],
+    ['format', general?.Format
+      ? `${color.bold(general.Format)}${general.Format_Profile ? color.dim(` (${general.Format_Profile})`) : ''}`
+      : color.yellow(`not recognised by MediaInfo${r.format ? color.dim(` (looks like ${r.format})`) : ''}`)],
     ['browsers', r.native === null ? color.dim('unknown')
       : r.native ? color.dim('decoded natively by at least one engine; the pipeline is the fallback')
                  : color.yellow('no engine decodes this natively; a pipeline is required')],
-    ['detected by', color.dim(r.evidence.join(', ') || 'nothing')],
+    ['detected by', color.dim(general?.Format ? 'MediaInfo' : r.evidence.join(', ') || 'nothing')],
   ];
   console.log(table(rows.map(([k, v]) => [color.dim(k), v]), { indent: '  ' }));
 
-  console.log(`\n  ${color.bold('streams')}`);
-  console.log(table(r.streams.map((s) => [
-    s.type,
-    s.codec ? color.bold(s.codec) : color.yellow('unidentified'),
-    color.dim([s.sampleEntry && `sample entry ${s.sampleEntry}`, s.codecId, s.fourcc && `fourcc ${s.fourcc}`, s.formatTag && `format tag ${s.formatTag}`, s.pid != null && `PID ${s.pid}`, s.id != null && `serial ${s.id}`, s.streamId, s.note].filter(Boolean).join(' · ')),
-  ]), { indent: '    ' }));
-
-  console.log(`\n  ${color.bold('pipeline')} ${color.dim(r.pipelineSource === 'assembled' ? '(from the streams found)' : '(curated default for this format)')}`);
-  console.log(`    using="${r.using}" with="${r.with.join(';')}"`);
-
-  if (match) {
-    const missing = match.modules.filter((m) => !m.entry);
-    console.log(`\n  ${color.bold('accessors')} ${color.dim(registry)}`);
-    console.log(table(match.modules.map(({ module, entry }) => entry
-      ? [color.green('✓'), color.bold(module), entry.name, entry.version, formatBytes(entry.brSize ?? entry.size), (entry.license ?? '') + (entry.licence_required ? color.yellow('*') : '')]
-      : [color.red('✗'), color.bold(module), color.dim('not published on this registry'), '', '', '']),
-      { indent: '    ' }));
-    if (match.modules.some((m) => m.entry?.licence_required)) console.log(color.dim('    * requires a licence'));
-    if (missing.length) log.warn(`${missing.length} accessor${missing.length === 1 ? '' : 's'} missing from the registry: ${missing.map((m) => m.module).join(', ')}`);
-    if (opts.all) {
-      const alt = Object.entries(match.alternatives);
-      if (alt.length) {
-        console.log(`\n  ${color.bold('other accessors declaring these codecs')}`);
-        console.log(table(alt.flatMap(([codec, hits]) => hits.map((h) => [codec, h.name, h.version, color.dim(h.file), `priority ${h.priority ?? 50}`])), { indent: '    ' }));
-      }
-    }
+  const streams = (tracks ?? []).filter((t) => t['@type'] !== 'General');
+  if (streams.length) {
+    console.log(`\n  ${color.bold('tracks')}`);
+    console.log(table(streams.map((t) => [t['@type'].toLowerCase(), t.Format ? color.bold(t.Format) : color.yellow('unidentified'), color.dim(trackDetails(t))]), { indent: '    ' }));
   }
 
-  for (const w of r.warnings) log.warn(w);
+  if (match) printResolved(match, opts, registry);
+  else {
+    console.log(`\n  ${color.bold('pipeline')} ${color.dim('(built-in suggestion, not checked against a registry)')}`);
+    console.log(`    using="${r.using}" with="${r.with.join(';')}"`);
+  }
 
-  const tag = r.kind === 'audio' ? 'audio' : r.kind === 'image' ? 'img' : 'video';
-  const el = r.kind === 'image' ? `img is="universal-img_1"` : `${tag} is="universal-${tag}_1"`;
-  console.log(`\n  ${color.dim(`<${el} src="${name}" using="${r.using}" with="${r.with.join(';')}"${r.kind === 'image' ? '' : ' controls'}>`)}\n`);
+  for (const w of r.warnings) if (!tracks) log.warn(w);
+
+  const el = result.element;
+  if (!match || match.missing.length || match.conflict || !match.with.length || !el) return console.log();
+  const attrs = `${el === 'canvas' ? 'data-url' : 'src'}="${name}" using="${match.using}" with="${match.with.join(';')}"${el === 'audio' ? ' controls' : ''}`;
+  console.log(`\n  ${color.dim(`<${el} is="universal-${el}_1" ${attrs}>`)}\n`);
+}
+
+function printResolved(match, opts, registry) {
+  console.log(`\n  ${color.bold('accessors')} ${color.dim(registry)}`);
+  console.log(table(match.needs.map((n) => {
+    const e = n.chosen;
+    return e
+      ? [color.green('✓'), describeNeed(n), color.bold(e.module), e.name, e.version, formatBytes(e.brSize ?? e.size), color.dim(e.using?.length ? `${e.using.join('|')} only` : ''), (e.license ?? '') + (e.licence_required ? color.yellow('*') : '')]
+      : [color.red('✗'), describeNeed(n), color.dim(n.unidentified ? 'MediaInfo could not identify it' : 'no published accessor declares it'), '', '', '', '', ''];
+  }), { indent: '    ' }));
+  if (match.needs.some((n) => n.chosen?.licence_required)) console.log(color.dim('    * requires a licence'));
+  if (opts.all) {
+    const alt = match.needs.flatMap((n) => n.candidates.slice(1).map((c) => [describeNeed(n), c.module, c.name, c.version, color.dim(`priority ${c.priority ?? 50}`)]));
+    if (alt.length) {
+      console.log(`\n  ${color.bold('other accessors that fit')}`);
+      console.log(table(alt, { indent: '    ' }));
+    }
+  }
+  if (match.conflict) {
+    log.warn(`no solver links all these accessors: ${match.conflict.map((c) => `${c.module} needs ${c.using.join(' or ')}`).join(', ')}`);
+    log.info(color.dim('  a page loads one solver: publish a variant of one of them for the other solver, or widen its "using"'));
+  } else if (match.with.length && !match.missing.length) console.log(color.dim(`    solver ${match.using}${match.fits.length > 1 ? ` (also fits ${match.fits.slice(1).join(', ')})` : ''}`));
+  if (match.missing.length) {
+    log.warn(`this registry cannot play the file yet: nothing published can ${match.missing.map(describeNeed).join(', ')}`);
+    const formats = [...new Set(match.missing.filter((n) => n.format).map((n) => n.format))];
+    const ext = match.missing.find((n) => n.byExtension && n.ext)?.ext;
+    const how = [formats.length && `"Format": [${formats.map((f) => JSON.stringify(f)).join(', ')}]`, ext && `"extension": {"${ext}": …}`].filter(Boolean);
+    if (how.length) log.info(color.dim(`  an accessor is found by its manifest: ${how.join(' or ')}`));
+  }
 }
 
 export async function run({ args, opts }) {
@@ -130,25 +137,34 @@ export async function run({ args, opts }) {
   }
 
   const results = [];
-  for (const target of args) {
-    try { results.push(await probeOne(target, opts, index)); }
-    catch (e) {
-      if (opts.json) results.push({ target, error: e.message });
-      else { log.error(`${target}: ${e.message}`); process.exitCode = 1; }
+  try {
+    for (const target of args) {
+      try { results.push(await probeOne(target, opts, index)); }
+      catch (e) {
+        if (opts.json) results.push({ target, error: e.message });
+        else { log.error(`${target}: ${e.message}`); process.exitCode = 1; }
+      }
     }
+  } finally {
+    await closeMediaInfo();
   }
 
   if (opts.json) {
     console.log(JSON.stringify(results.map((r) => r.error ? r : {
-      file: r.target, ...r.report,
-      accessors: r.match?.modules.map((m) => ({ module: m.module, published: !!m.entry, name: m.entry?.name, version: m.entry?.version })),
+      file: r.target, ...r.report, tracks: r.tracks,
+      ...(r.match ? {
+        using: r.match.using, solvers: r.match.fits, conflict: r.match.conflict,
+        with: r.match.with,
+        accessors: r.match.needs.map((n) => ({ need: n.role, format: n.format, type: n.type, module: n.chosen?.module ?? null, name: n.chosen?.name, version: n.chosen?.version, using: n.chosen?.using, candidates: n.candidates.map((c) => c.module) })),
+        missing: r.match.missing.map(describeNeed),
+      } : {}),
     }), null, 2));
   } else {
     for (const r of results) print(r, opts, registry);
   }
 
   if (opts.install) {
-    const names = [...new Set(results.flatMap((r) => r.match?.modules.filter((m) => m.entry).map((m) => m.entry.name) ?? []))];
+    const names = [...new Set(results.flatMap((r) => r.match?.needs.filter((n) => n.chosen).map((n) => n.chosen.name) ?? []))];
     if (!index) throw new CliError('--install needs the registry', { hint: 'drop --offline, or check `bevara ping`' });
     if (!names.length) throw new CliError('none of the required accessors are published on this registry');
     if (!project.manifestFile)

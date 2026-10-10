@@ -102,6 +102,35 @@ the name.
 ## Accessors (for players, CORS `*`)
 See PACKAGE_FORMAT.md — `/accessors/<name>_<abi>.wasm`, `/accessors/<name>/<version>/<file>`, `/accessors/index.json`, `/accessors/filter_list.json`.
 
+## Selection (no auth, CORS `*`)
+Capability-driven selection (paper, Section 5; DESIGN.md D13): every accessor
+whose declared inputs accept the query's, under side conditions.
+
+| Method | Path | |
+|---|---|---|
+| POST | `/-/select` | body: the query as JSON |
+| GET | `/-/select?query=<JSON>` | the same, URL-encoded |
+| GET | `/-/select?pixfmt=rgba&maxpriority=50` | plain parameters: any other name is an input property; `output=PROP=VALUE`, `projectname`, `version`, `language`, `maxsize`, `license`, `geocode`, `filter` |
+
+```json
+{ "inputs": [{ "property": "GF_PROP_PID_PIXFMT", "format": "GF_PIXEL_RGBA" }],
+  "version": "2.1", "IP": { "condition": false, "license": null, "geocode": null },
+  "projectname": "ffmpeg", "language": "wasm", "size": { "condition": false, "maxsize": null },
+  "maxpriority": 50 }
+```
+
+Properties and values take GPAC's names, with or without prefix
+(`GF_PROP_PID_PIXFMT`, `PIXFMT`, `PixelFormat`; `GF_PIXEL_RGBA`, `rgba`).
+`outputs` selects on what a module produces, run-time formats included.
+`maxsize` is bytes or `"200kB"`, `"1.5MB"`.
+
+Answer: `{ query, total, matches: [{ name, version, file, url, filter, priority,
+size, brSize, projects, language, license, licence_required, using, accepts,
+produces }], excluded: [{ name, filter, reason }], uncharacterised: [name] }` —
+`matches` most preferred first (priority, then size); `excluded` fit the
+capabilities but fail a side condition; `uncharacterised` were published
+without `caps`. A malformed query is a `400` saying what is wrong.
+
 ## Misc
 `GET /-/ping`, `GET /-/config`, `GET /` (web catalog).
 

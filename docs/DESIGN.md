@@ -333,11 +333,39 @@ holds: an `.mp4` with HEVC and one with AV1 need different decoders.
 - *Consequences*: the file is named after its dominant stream — an AVI whose video
   could not be identified stays an AVI, it does not become its audio codec.
 
-**D8.3 — The pipeline is assembled from the streams, with a curated fallback.**
-Demultiplexer for the container, a decoder per stream, and for video the encoder
-tail (`isobmff_1`, `libx264_1`, `libopusenc_1`) that makes the output playable
-by any browser. If a stream is unidentified or has no known decoder, the curated
-pipeline of the format is used instead, rather than a list missing a decoder.
+**D8.3 — Tracks are named by MediaInfo, accessors chosen the editor's way.**
+The filter manifests describe what they read in MediaInfo's vocabulary
+(`"Format": ["JPEG 2000"]`), because the editor matches them against MediaInfo
+(Editor/Interface, `libraries.service.ts`). `probe` and `update-page` run the
+same library (mediainfo.js) and apply the same rule (`capabilities.js`): an
+accessor fits a track whose Format is in its `"Format"` list, or the file when
+its extension is one of its `"extension"` keys — which covers what MediaInfo
+does not recognise (JPEG XL). Only accessors the registry carries are candidates.
+On top of the editor's union of matches, the file is split into needs — a
+demultiplexer for the container (unless the solver reads it: MPEG-TS/PS, WAV), a
+decoder per stream — so that a need no published accessor covers is reported,
+and `update-page` leaves that element alone. Lower `priority` wins. As in the
+editor, a video track is drawn on a `<canvas>`; a `<video>` element also needs
+the remux/encode tail (`isobmff_1`, `libx264_1`, `libopusenc_1`), which declares
+no Format and is therefore looked up by name, still only when published.
+- *Rejected*: naming accessors from a built-in table (`openjpeg_1` for JPEG 2000)
+  and checking afterwards whether they exist, which suggests modules nobody has
+  published; and a home-made table of codec aliases, which MediaInfo's names make
+  unnecessary. The built-in table remains for `--offline`, unchecked.
+
+**D8.5 — The solver comes from the accessors' `"using"`.**
+A side module links only against a solver that exports what it imports, and a
+page loads a single solver. Each manifest lists the solvers it works with
+(`"using"`, absent = any); resolution tries the preferred solver of the element
+(`solver_minimal_1` for images and audio, `solver_1` for a canvas, as in the
+editor), then the others, and keeps the first under which every need has an
+accessor. Accessors that cannot share a solver are reported as a conflict, not
+as a missing codec. `update-page` picks one solver for the whole page, keeping
+the one universal elements already on it use.
+- *Rejected*: deriving the solver from the module's imports at probe time. It
+  needs the solver builds and their JS glue (`invoke_*` live there, not in the
+  `.wasm`), and weak symbols show up as imports without being missing. It belongs
+  at build time, where the solver builds are at hand.
 
 **D8.4 — The format table is shared with the browser extension.**
 `formats.js` is ported verbatim from `bevara-extension/src/common/formats.js`
@@ -416,8 +444,9 @@ own JSON message is kept as is, and its `hint`, when present, is shown. Network
 failures are named by cause (DNS, refused connection, TLS, timeout).
 
 **D11.3 — Few dependencies.**
-The CLI depends on `semver` and `tar` only; Wasm inspection, HTML scanning,
-container parsing and signing use Node built-ins.
+The CLI depends on `semver`, `tar` and `mediainfo.js` (the MediaInfo Wasm build,
+for the same track names as the editor, D8.3); Wasm inspection, HTML scanning,
+the built-in container parsing and signing use Node built-ins.
 
 **D11.4 — Debugging never touches real credentials.**
 The VS Code configurations point `BEVARA_CONFIG` at a scratch file and attach to
@@ -435,7 +464,81 @@ that consumers, not the registry, verify. Should the component model gain dynami
 linking with shared memory, accessors could become components and Warg their
 transport; the capability index and browser delivery would remain specific.
 
-## 13. Known limitations
+## 13. Selecting by capability: caps and select
+
+**D13.1 — Capabilities are read from the C source, not declared.**
+At publish, `caps.js` finds each GPAC register the manifest lists (by `.name`,
+through `filter_source`), its `SETCAPS` array and its `.priority`, and
+publishes them per filter as `caps`: bundles of `{property, format}` on the
+input and output sides, with `excluded`, `optional` and `static` from the flags.
+- *Why*: the same rule as the version (CMake) and the licence (LICENCE): the
+  source already says it, and a copy in `<name>.json` would drift from the code
+  that GPAC actually resolves on.
+- *How*: a lexer, not a C compiler — comments stripped, every `#if` branch read,
+  `CAP_*()` macros, designated (`{ .code=…, .flags=… }`) and positional
+  (`{flags, code, {type, {.uint = v}}, NULL, prio}`) initialisers, `{0}` closing
+  a bundle. Values keep their GPAC names (`GF_PIXEL_RGBA`), the vocabulary of
+  the paper's query; nothing is evaluated.
+- *Consequences*: a filter registered under another name than the manifest's
+  (`ffdec` registers `"ffdec-h26x"` and renames itself at run time) is found
+  through `filter_source` when that file holds a single register. Caps built at
+  run time (`gf_filter_push_caps`) are not seen.
+
+**D13.2 — What is decided at run time is declared, under `"runtime"`.**
+A decoder's static caps say "raw video out"; the pixel format comes from
+`gf_filter_pid_set_property(…, GF_PROP_PID_PIXFMT, &PROP_UINT(x))` in
+`configure_pid`. A literal `x`, or a choice between literals, is read; a
+variable (`ctx->ofmt`, `pix_fmt`) is reported, with the candidates found in the
+code (assignments, `switch` cases, the helper that computes it), and the
+author declares the formats in `<name>.json`:
+`"runtime": { "jxldec": { "outputs": [{ "property": "GF_PROP_PID_PIXFMT", "format": ["GF_PIXEL_RGB", "GF_PIXEL_RGBA"] }] } }`.
+`bevara caps --write` writes the candidates for review.
+- *Why*: this is the only information the source cannot give; it is what a
+  selection on `GF_PROP_PID_PIXFMT` needs.
+- *Rejected*: observing the output PID at run time with `bevara test` — the
+  solver has no inspect filter to report PID properties; it would be exact for
+  the files tried and only for them.
+- *Consequences*: run-time formats count only where they describe an output —
+  not on a parser that sets `PIXFMT` on a compressed stream (`rfjpeg`), not a
+  pixel format in an audio-only build of the shared ffmpeg code. The ffmpeg
+  wrappers were declared from the decoders actually linked in their
+  `libavcodec.a` (`llvm-nm`), not from the shared code's candidates.
+
+**D13.3 — Matching follows GPAC, with a partial PID.**
+The query's `inputs` describe the current output. A bundle fits when, for every
+property the query gives and the bundle constrains, the value is allowed and
+not excluded (string caps are `|` alternatives); a property the query does not
+give is not held against the bundle. A raw format implies the rest
+(`PIXFMT` ⇒ visual, `GF_CODECID_RAW`), so decoders of compressed streams drop
+out. The bundle must accept at least one of the query's properties by name —
+the stream type alone does not count unless it is all the query gives —
+otherwise every demultiplexer "accepts" a JPEG XL codestream by saying nothing.
+A codec declared as `GF_4CC('J','X','L',' ')` compares as `GF_CODECID_JXL`.
+
+**D13.4 — The side conditions of the paper, as read here.**
+- `version`: a bare version is a **minimum** (it is listed with `maxsize` and
+  `maxpriority`); with an operator, a semver range. Versions are generations
+  (`1.0.0`), so `2.1` selects nothing today.
+- `IP`: when `condition` is true, an accessor that needs a patent licence
+  (`licence_required`) is excluded where it applies — everywhere, or in the
+  `georestrictions` territories that contain `geocode`; `license` lists the
+  accepted SPDX licences.
+- `projectname`: one of `projects`, derived from the static libraries in `lib/`
+  (`libavcodec.a` ⇒ ffmpeg); every accessor is also `gpac`. Compared without a
+  `lib` prefix.
+- `language`: `wasm` for every published accessor; `js` is reserved.
+- `size`: the raw `.wasm` size, when `condition` is true.
+- `maxpriority`: the GPAC priority of the filter that fits (0 when the register
+  sets none, as in GPAC).
+- Ranking: priority, then size.
+
+**D13.5 — One matcher, two places.**
+`select.js` is the same file in the CLI and the registry (a test compares
+them), like `manifest.js`. The registry answers `GET|POST /-/select` (CORS `*`,
+GET with plain parameters for a player); the CLI runs the same function on
+`/accessors/index.json` when the registry predates the endpoint.
+
+## 14. Known limitations
 
 - **The registry image has not been built or deployed yet**; the default
   registry answers `503` until it is.

@@ -373,6 +373,21 @@ describe('administrators and namespaces on an existing registry', () => {
     } finally { await reg.close(); }
   });
 
+  test('"extension" and "using" are published in the capability index', async () => {
+    const reg = await startRegistry();
+    try {
+      const tok = await signup(reg.api, 'root');
+      assert.equal((await publish(reg.api, tok, manifest({ name: 'extdec', extension: { xyz: 'img' }, using: ['solver_1'] }))).status, 201);
+      const idx = await reg.api('GET', '/accessors/index.json');
+      const e = idx.data.filters.find((f) => f.file === 'extdec_1.wasm');
+      assert.deepEqual(e.extension, { xyz: 'img' });
+      assert.deepEqual(e.using, ['solver_1']);
+      assert.equal((await publish(reg.api, tok, manifest({ name: 'badext', extension: ['xyz'] }))).status, 400);
+      assert.equal((await publish(reg.api, tok, manifest({ name: 'badusing', using: 'solver_1' }))).status, 400);
+      assert.equal((await publish(reg.api, tok, manifest({ name: 'badusing', using: ['solver'] }))).status, 400);
+    } finally { await reg.close(); }
+  });
+
   test('reading needs no account; publishing needs one, and nothing else', async () => {
     const reg = await startRegistry();
     try {
@@ -452,5 +467,49 @@ describe('deployment', () => {
       const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
       assert.equal((await reg.api('GET', '/-/ping')).data.version, pkg.version);
     } finally { await reg.close(); }
+  });
+});
+
+describe('selection by capability (/-/select)', () => {
+  let reg, token;
+  const raw = [{ property: 'GF_PROP_PID_STREAM_TYPE', format: 'GF_STREAM_VISUAL' }, { property: 'GF_PROP_PID_CODECID', format: 'GF_CODECID_RAW' }];
+  before(async () => {
+    reg = await startRegistry();
+    token = await signup(reg.api);
+    const pub = (name, filter, priority, projects) => publish(reg.api, token, manifest({ name, filters: [filter], projects, caps: [{ filter, priority, bundles: [{ inputs: raw, outputs: [] }] }] }));
+    assert.equal((await pub('rgbenc', 'rgbenc', 0, ['gpac', 'libpng'])).status, 201);
+    assert.equal((await pub('ffenc', 'ffenc', 128, ['gpac', 'ffmpeg'])).status, 201);
+    assert.equal((await publish(reg.api, token, manifest({ name: 'nocaps', filters: ['nocapsdec'] }))).status, 201);
+  });
+  after(() => reg.close());
+
+  test('answers the paper query by POST, priority bound and all', async () => {
+    const r = await reg.api('POST', '/-/select', { body: { inputs: [{ property: 'GF_PROP_PID_PIXFMT', format: 'GF_PIXEL_RGBA' }], maxpriority: 50, language: 'wasm' } });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.data.matches.map((m) => m.filter), ['rgbenc']);
+    assert.ok(r.data.matches[0].url.endsWith('/rgbenc_1.wasm'));
+    assert.ok(r.data.excluded.some((x) => x.name === 'bevara:ffenc' && /priority/.test(x.reason)));
+    assert.deepEqual(r.data.uncharacterised, ['bevara:nocaps']);
+    assert.equal(r.headers.get('access-control-allow-origin'), '*');
+  });
+
+  test('answers by GET, as JSON or as plain parameters, without an account', async () => {
+    const q = encodeURIComponent(JSON.stringify({ inputs: [{ property: 'PIXFMT', format: 'RGBA' }], projectname: 'ffmpeg' }));
+    assert.deepEqual((await reg.api('GET', `/-/select?query=${q}`)).data.matches.map((m) => m.filter), ['ffenc']);
+    assert.deepEqual((await reg.api('GET', '/-/select?pixfmt=rgba&maxpriority=200')).data.matches.map((m) => m.filter), ['rgbenc', 'ffenc']);
+  });
+
+  test('explains a malformed query', async () => {
+    const r = await reg.api('POST', '/-/select', { body: { maxpriority: 50 } });
+    assert.equal(r.status, 400);
+    assert.match(r.data.error, /selects nothing/);
+  });
+
+  test('publishes caps, projects and language in the index', async () => {
+    const { data } = await reg.api('GET', '/accessors/index.json');
+    const e = data.filters.find((f) => f.name === 'bevara:rgbenc');
+    assert.equal(e.caps[0].filter, 'rgbenc');
+    assert.deepEqual(e.projects, ['gpac', 'libpng']);
+    assert.equal(e.language, 'wasm');
   });
 });

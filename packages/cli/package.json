@@ -1,6 +1,6 @@
 {
   "name": "@bevara/cli",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Filter manager for Bevara",
   "keywords": [
     "Filter",
@@ -34,6 +34,7 @@
     "test": "node --test \"test/**/*.test.js\""
   },
   "dependencies": {
+    "mediainfo.js": "^0.3.8",
     "semver": "^7.6.0",
     "tar": "^7.4.0"
   },

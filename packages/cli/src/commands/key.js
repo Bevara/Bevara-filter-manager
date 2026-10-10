@@ -19,7 +19,12 @@ export async function ensureKey(client, registry, { label } = {}) {
     setKey(registry, key);
     log.step(`generated signing key ${color.bold(key.keyId)}`);
   }
-  await client.put('/-/keys', { publicKey: key.publicKey, label: label ?? `bevara-cli` });
+  try {
+    await client.put('/-/keys', { publicKey: key.publicKey, label: label ?? `bevara-cli` });
+  } catch (e) {
+    if (e.status === 409) e.hint = 'replace the local key: `bevara key generate --force`';
+    throw e;
+  }
   return key;
 }
 
