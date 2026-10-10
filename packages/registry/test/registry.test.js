@@ -373,6 +373,21 @@ describe('administrators and namespaces on an existing registry', () => {
     } finally { await reg.close(); }
   });
 
+  test('"extension" and "using" are published in the capability index', async () => {
+    const reg = await startRegistry();
+    try {
+      const tok = await signup(reg.api, 'root');
+      assert.equal((await publish(reg.api, tok, manifest({ name: 'extdec', extension: { xyz: 'img' }, using: ['solver_1'] }))).status, 201);
+      const idx = await reg.api('GET', '/accessors/index.json');
+      const e = idx.data.filters.find((f) => f.file === 'extdec_1.wasm');
+      assert.deepEqual(e.extension, { xyz: 'img' });
+      assert.deepEqual(e.using, ['solver_1']);
+      assert.equal((await publish(reg.api, tok, manifest({ name: 'badext', extension: ['xyz'] }))).status, 400);
+      assert.equal((await publish(reg.api, tok, manifest({ name: 'badusing', using: 'solver_1' }))).status, 400);
+      assert.equal((await publish(reg.api, tok, manifest({ name: 'badusing', using: ['solver'] }))).status, 400);
+    } finally { await reg.close(); }
+  });
+
   test('reading needs no account; publishing needs one, and nothing else', async () => {
     const reg = await startRegistry();
     try {

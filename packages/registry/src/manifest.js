@@ -53,7 +53,13 @@ export function validateManifest(m, { forPublish = false } = {}) {
     else for (const s of m.support) if (!SUPPORT_VALUES.includes(s)) warnings.push(`unknown "support" value ${JSON.stringify(s)} (known: ${SUPPORT_VALUES.join(', ')})`);
   }
   if (m.formats !== undefined && !isStrArray(m.formats)) errors.push('"formats" must be an array of strings');
+  if (m.extension !== undefined && (!m.extension || typeof m.extension !== 'object' || Array.isArray(m.extension) || !Object.values(m.extension).every(isStr)))
+    errors.push('"extension" must map file extensions to the element that shows them ({"jxl": "img"})');
   if (m.keywords !== undefined && !isStrArray(m.keywords)) errors.push('"keywords" must be an array of strings');
+  if (m.using !== undefined) {
+    if (!isStrArray(m.using) || !m.using.length || !m.using.every((u) => /^[A-Za-z0-9][A-Za-z0-9._-]*_\d+$/.test(u)))
+      errors.push('"using" must list the solvers the module links against, as pages name them (["solver_1"], ["solver_minimal_1", "solver_1"])');
+  } else if (forPublish) warnings.push('"using" is not set: the module is taken to link against any solver (list the ones it works with, e.g. ["solver_1"])');
   if (m.license !== undefined && !isStr(m.license)) errors.push('"license" must be a string (SPDX identifier)');
   if (m.license === undefined && forPublish) warnings.push('no licence: add a LICENCE file (an "SPDX-License-Identifier:" line makes it exact)');
   if (m.licence_required !== undefined && typeof m.licence_required !== 'boolean') errors.push('"licence_required" must be a boolean');
@@ -116,7 +122,7 @@ export function normalizeManifest(m) {
 }
 
 // Fields that are meaningful once published (everything a consumer needs).
-export const PUBLIC_FIELDS = ['name', 'version', 'abi', 'module', 'description', 'filters', 'support', 'formats', 'keywords', 'license', 'licence_required', 'georestrictions', 'priority', 'inputs', 'outputs', 'sources', 'homepage', 'filter_source', 'dependencies', 'help', 'author'];
+export const PUBLIC_FIELDS = ['name', 'version', 'abi', 'module', 'description', 'filters', 'support', 'formats', 'extension', 'using', 'keywords', 'license', 'licence_required', 'georestrictions', 'priority', 'inputs', 'outputs', 'sources', 'homepage', 'filter_source', 'dependencies', 'help', 'author'];
 
 export function publicManifest(m) {
   const out = {};

@@ -24,13 +24,31 @@ The existing manifests are published as they are:
     "help": "This filter decodes JXL images using libjxl.",
     "filters": ["jxldec", "rfjxl"],   // GPAC filter names registered by the module
     "support": ["image"],             // image | audio | video | canvas | text | subtitle | container
-    "Format": ["JPEG XL"],            // formats handled; read as "formats" by the registry
-    "extension": { "jxl": "img" },    // without "Format", these keys serve as formats
+    "Format": ["JPEG XL"],            // MediaInfo format names handled; read as "formats" by the registry
+    "extension": { "jxl": "img" },    // file extensions read, and the element that shows them
+    "using": ["solver_minimal_1", "solver_1"],   // solvers the module links against (default: any)
     "licence_required": false,        // true when the site owner needs a patent/commercial licence
     "sources": "https://github.com/Bevara/libjxl",
     "filter_source": { "jxldec": "dec_jxl.c", "rfjxl": "reframe_jxl.c" }
 }
 ```
+
+**`Format` and `extension` are how a file finds the accessor.** `bevara probe`
+and `bevara update-page` identify a file with MediaInfo, as the editor does, and
+pick an accessor whose `"Format"` holds the MediaInfo name of a track (`"JPEG
+2000"`, `"AVC"`, `"Ogg"`), or whose `"extension"` holds the file's extension. A
+manifest with neither is never proposed. `bevara probe <file>` prints the
+names MediaInfo gives.
+
+**`using` lists the solvers the module links against.** An accessor is a side
+module: the solver a page loads (`using="…"`) must export every symbol it
+imports, and the two solvers differ — `isobmff` imports GPAC functions only
+`solver_1` has, `libtta` needs `invoke_*` trampolines only `solver_minimal_1`
+defines. A page loads one solver (the loader keeps the first), so `probe` and
+`update-page` pick one that every chosen accessor lists, and report the
+accessors that cannot share one. Without `using`, a module is taken to work with
+any solver, and publishing warns. To check a module's imports against a solver,
+see `AGENTS.md` in the player repository.
 
 **The licence comes from the `LICENCE` file** (or `LICENSE`, `COPYING`) at the
 root of the repository, not from the manifest. Start it with an SPDX tag to state

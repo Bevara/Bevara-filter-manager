@@ -333,11 +333,39 @@ holds: an `.mp4` with HEVC and one with AV1 need different decoders.
 - *Consequences*: the file is named after its dominant stream — an AVI whose video
   could not be identified stays an AVI, it does not become its audio codec.
 
-**D8.3 — The pipeline is assembled from the streams, with a curated fallback.**
-Demultiplexer for the container, a decoder per stream, and for video the encoder
-tail (`isobmff_1`, `libx264_1`, `libopusenc_1`) that makes the output playable
-by any browser. If a stream is unidentified or has no known decoder, the curated
-pipeline of the format is used instead, rather than a list missing a decoder.
+**D8.3 — Tracks are named by MediaInfo, accessors chosen the editor's way.**
+The filter manifests describe what they read in MediaInfo's vocabulary
+(`"Format": ["JPEG 2000"]`), because the editor matches them against MediaInfo
+(Editor/Interface, `libraries.service.ts`). `probe` and `update-page` run the
+same library (mediainfo.js) and apply the same rule (`capabilities.js`): an
+accessor fits a track whose Format is in its `"Format"` list, or the file when
+its extension is one of its `"extension"` keys — which covers what MediaInfo
+does not recognise (JPEG XL). Only accessors the registry carries are candidates.
+On top of the editor's union of matches, the file is split into needs — a
+demultiplexer for the container (unless the solver reads it: MPEG-TS/PS, WAV), a
+decoder per stream — so that a need no published accessor covers is reported,
+and `update-page` leaves that element alone. Lower `priority` wins. As in the
+editor, a video track is drawn on a `<canvas>`; a `<video>` element also needs
+the remux/encode tail (`isobmff_1`, `libx264_1`, `libopusenc_1`), which declares
+no Format and is therefore looked up by name, still only when published.
+- *Rejected*: naming accessors from a built-in table (`openjpeg_1` for JPEG 2000)
+  and checking afterwards whether they exist, which suggests modules nobody has
+  published; and a home-made table of codec aliases, which MediaInfo's names make
+  unnecessary. The built-in table remains for `--offline`, unchecked.
+
+**D8.5 — The solver comes from the accessors' `"using"`.**
+A side module links only against a solver that exports what it imports, and a
+page loads a single solver. Each manifest lists the solvers it works with
+(`"using"`, absent = any); resolution tries the preferred solver of the element
+(`solver_minimal_1` for images and audio, `solver_1` for a canvas, as in the
+editor), then the others, and keeps the first under which every need has an
+accessor. Accessors that cannot share a solver are reported as a conflict, not
+as a missing codec. `update-page` picks one solver for the whole page, keeping
+the one universal elements already on it use.
+- *Rejected*: deriving the solver from the module's imports at probe time. It
+  needs the solver builds and their JS glue (`invoke_*` live there, not in the
+  `.wasm`), and weak symbols show up as imports without being missing. It belongs
+  at build time, where the solver builds are at hand.
 
 **D8.4 — The format table is shared with the browser extension.**
 `formats.js` is ported verbatim from `bevara-extension/src/common/formats.js`
@@ -416,8 +444,9 @@ own JSON message is kept as is, and its `hint`, when present, is shown. Network
 failures are named by cause (DNS, refused connection, TLS, timeout).
 
 **D11.3 — Few dependencies.**
-The CLI depends on `semver` and `tar` only; Wasm inspection, HTML scanning,
-container parsing and signing use Node built-ins.
+The CLI depends on `semver`, `tar` and `mediainfo.js` (the MediaInfo Wasm build,
+for the same track names as the editor, D8.3); Wasm inspection, HTML scanning,
+the built-in container parsing and signing use Node built-ins.
 
 **D11.4 — Debugging never touches real credentials.**
 The VS Code configurations point `BEVARA_CONFIG` at a scratch file and attach to

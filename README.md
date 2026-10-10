@@ -119,11 +119,16 @@ bevara probe https://example.org/clip.mp4 --json
 bevara probe movie.mkv --install        # install exactly the accessors it needs
 ```
 
-`probe` parses the container (Ogg, ISOBMFF, Matroska, AVI, MPEG-PS/TS, FLV) to
-list the real elementary streams, so an `.mp4` holding HEVC+AAC and one holding
-AV1+Opus get different pipelines. It reads only the head and tail of the file —
-a few hundred kilobytes, over HTTP range requests for a URL — and checks every
-accessor it names against the registry, reporting the ones that are missing.
+`probe` identifies the file with MediaInfo (mediainfo.js), as the editor does:
+the container and each track get MediaInfo's format name (`Ogg`, `Theora`,
+`JPEG 2000`, `AVC`…), and MediaInfo reads only the chunks it needs — over HTTP
+range requests for a URL. The accessors are then chosen among those the registry
+carries, by the editor's rule: a track whose `Format` is in an accessor's
+`"Format"` list, or the file when its extension is one of the accessor's
+`"extension"` keys (what MediaInfo does not recognise, such as JPEG XL). A
+container or stream nobody has published an accessor for is reported as missing,
+never filled with a module name the registry does not have. `--offline` prints
+the built-in suggestion instead.
 
 ### Convert an existing page
 

@@ -154,7 +154,7 @@ export class RegistryClient {
     this.token = token;
   }
 
-  async request(method, p, { body, headers = {}, raw = false, auth = true } = {}) {
+  async request(method, p, { body, headers = {}, raw = false, auth = true, onProgress } = {}) {
     const h = { ...headers };
     if (auth && this.token) h.authorization = `Bearer ${this.token}`;
     let payload = body;
@@ -162,9 +162,15 @@ export class RegistryClient {
       h['content-type'] = 'application/json';
       payload = JSON.stringify(body);
     }
+    const init = { method, headers: h, body: payload };
+    if (onProgress && Buffer.isBuffer(body)) {
+      h['content-length'] = String(body.length);
+      init.body = uploadStream(body, onProgress);
+      init.duplex = 'half';
+    }
     let res;
     try {
-      res = await fetch(this.base + p, { method, headers: h, body: payload });
+      res = await fetch(this.base + p, init);
     } catch (e) {
       const d = describeNetworkFailure(e, this.base + p);
       throw new RegistryError(0, d.message, { hint: d.hint });
@@ -200,6 +206,21 @@ export class RegistryClient {
     }
     return Buffer.from(await res.arrayBuffer());
   }
+}
+
+/* A buffer as a stream of 64 kB chunks, reporting (sent, total) as each one
+ * is pulled by fetch. */
+function uploadStream(buf, onProgress, chunk = 64 * 1024) {
+  let sent = 0;
+  return new ReadableStream({
+    pull(controller) {
+      if (sent >= buf.length) { controller.close(); return; }
+      const part = buf.subarray(sent, sent + chunk);
+      sent += part.length;
+      controller.enqueue(new Uint8Array(part));
+      onProgress(sent, buf.length);
+    },
+  });
 }
 
 async function httpError(res, { base, method, path, prefix = '' }) {
