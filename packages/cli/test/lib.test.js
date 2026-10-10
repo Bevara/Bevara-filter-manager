@@ -41,7 +41,8 @@ describe('manifest validation', () => {
   test('normalize fills defaults', () => {
     const m = normalizeManifest(base);
     assert.equal(m.abi, 1);
-    assert.equal(m.priority, 50);
+    // No invented priority: it is GPAC's, read from the register by caps.js.
+    assert.equal(m.priority, undefined);
     assert.deepEqual(m.dependencies, {});
   });
 });

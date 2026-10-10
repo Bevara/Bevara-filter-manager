@@ -32,6 +32,7 @@ these requirements, and the alternatives rejected, are in
 | [R17](#r17) | The licence is stated once, in a LICENCE file, never in the manifest | 2026-10-07 |
 | [R18](#r18) | `--build` builds under `.bevara/` by default, which repositories ignore in git | 2026-10-07 |
 | [R19](#r19) | Anyone reads the registry without an account; any authenticated account publishes filters | 2026-10-08 |
+| [R20](#r20) | Accessors are selected by capability, priority, size, licence, project — the paper's query | 2026-10-10 |
 
 ---
 
@@ -198,3 +199,33 @@ pages already load.
 
 - Where: publish route in `registry/src/app.js` (reads never call `requireAuth`)
 - Checked by: `registry.test.js` "reading needs no account; publishing needs one, and nothing else", "namespaces: the default one is open to any account…", e2e step "namespaces"
+
+### R20
+**The registry answers the capability query of the paper** (MMSys, Section 5,
+"the full library"): not a named module, but every accessor whose declared
+inputs accept the current output, under side conditions —
+
+```yaml
+inputs:
+  - property: GF_PROP_PID_PIXFMT
+    format:   GF_PIXEL_RGBA
+version:     2.1
+IP:          { condition: false, license: , geocode: }
+projectname: "ffmpeg"
+language:    "wasm"
+size:        { condition: false, maxsize: }
+maxpriority: 50
+```
+
+The information is read from the filters themselves: the capability bundles
+and `.priority` of each GPAC register, from the C source. What the source
+decides only at run time — the pixel or audio format a decoder sets on its
+output — and cannot be read from it is declared in `<name>.json` under
+`"runtime"`; `bevara caps --write` proposes it from the code.
+
+- Where: `cli/src/lib/caps.js` (extraction), `filterManifest` in `cli/src/lib/pack.js`
+  (published as `caps`, `projects`, `language`), `cli/src/lib/select.js` = `registry/src/select.js`
+  (matching), `GET|POST /-/select` in `registry/src/app.js`, commands `caps` and `select`
+- Checked by: `cli/test/caps.test.js`, `cli/test/select.test.js` (the query pasted from
+  the paper; the two copies of select.js are identical), `registry.test.js` "selection by capability"
+

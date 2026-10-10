@@ -464,7 +464,81 @@ that consumers, not the registry, verify. Should the component model gain dynami
 linking with shared memory, accessors could become components and Warg their
 transport; the capability index and browser delivery would remain specific.
 
-## 13. Known limitations
+## 13. Selecting by capability: caps and select
+
+**D13.1 — Capabilities are read from the C source, not declared.**
+At publish, `caps.js` finds each GPAC register the manifest lists (by `.name`,
+through `filter_source`), its `SETCAPS` array and its `.priority`, and
+publishes them per filter as `caps`: bundles of `{property, format}` on the
+input and output sides, with `excluded`, `optional` and `static` from the flags.
+- *Why*: the same rule as the version (CMake) and the licence (LICENCE): the
+  source already says it, and a copy in `<name>.json` would drift from the code
+  that GPAC actually resolves on.
+- *How*: a lexer, not a C compiler — comments stripped, every `#if` branch read,
+  `CAP_*()` macros, designated (`{ .code=…, .flags=… }`) and positional
+  (`{flags, code, {type, {.uint = v}}, NULL, prio}`) initialisers, `{0}` closing
+  a bundle. Values keep their GPAC names (`GF_PIXEL_RGBA`), the vocabulary of
+  the paper's query; nothing is evaluated.
+- *Consequences*: a filter registered under another name than the manifest's
+  (`ffdec` registers `"ffdec-h26x"` and renames itself at run time) is found
+  through `filter_source` when that file holds a single register. Caps built at
+  run time (`gf_filter_push_caps`) are not seen.
+
+**D13.2 — What is decided at run time is declared, under `"runtime"`.**
+A decoder's static caps say "raw video out"; the pixel format comes from
+`gf_filter_pid_set_property(…, GF_PROP_PID_PIXFMT, &PROP_UINT(x))` in
+`configure_pid`. A literal `x`, or a choice between literals, is read; a
+variable (`ctx->ofmt`, `pix_fmt`) is reported, with the candidates found in the
+code (assignments, `switch` cases, the helper that computes it), and the
+author declares the formats in `<name>.json`:
+`"runtime": { "jxldec": { "outputs": [{ "property": "GF_PROP_PID_PIXFMT", "format": ["GF_PIXEL_RGB", "GF_PIXEL_RGBA"] }] } }`.
+`bevara caps --write` writes the candidates for review.
+- *Why*: this is the only information the source cannot give; it is what a
+  selection on `GF_PROP_PID_PIXFMT` needs.
+- *Rejected*: observing the output PID at run time with `bevara test` — the
+  solver has no inspect filter to report PID properties; it would be exact for
+  the files tried and only for them.
+- *Consequences*: run-time formats count only where they describe an output —
+  not on a parser that sets `PIXFMT` on a compressed stream (`rfjpeg`), not a
+  pixel format in an audio-only build of the shared ffmpeg code. The ffmpeg
+  wrappers were declared from the decoders actually linked in their
+  `libavcodec.a` (`llvm-nm`), not from the shared code's candidates.
+
+**D13.3 — Matching follows GPAC, with a partial PID.**
+The query's `inputs` describe the current output. A bundle fits when, for every
+property the query gives and the bundle constrains, the value is allowed and
+not excluded (string caps are `|` alternatives); a property the query does not
+give is not held against the bundle. A raw format implies the rest
+(`PIXFMT` ⇒ visual, `GF_CODECID_RAW`), so decoders of compressed streams drop
+out. The bundle must accept at least one of the query's properties by name —
+the stream type alone does not count unless it is all the query gives —
+otherwise every demultiplexer "accepts" a JPEG XL codestream by saying nothing.
+A codec declared as `GF_4CC('J','X','L',' ')` compares as `GF_CODECID_JXL`.
+
+**D13.4 — The side conditions of the paper, as read here.**
+- `version`: a bare version is a **minimum** (it is listed with `maxsize` and
+  `maxpriority`); with an operator, a semver range. Versions are generations
+  (`1.0.0`), so `2.1` selects nothing today.
+- `IP`: when `condition` is true, an accessor that needs a patent licence
+  (`licence_required`) is excluded where it applies — everywhere, or in the
+  `georestrictions` territories that contain `geocode`; `license` lists the
+  accepted SPDX licences.
+- `projectname`: one of `projects`, derived from the static libraries in `lib/`
+  (`libavcodec.a` ⇒ ffmpeg); every accessor is also `gpac`. Compared without a
+  `lib` prefix.
+- `language`: `wasm` for every published accessor; `js` is reserved.
+- `size`: the raw `.wasm` size, when `condition` is true.
+- `maxpriority`: the GPAC priority of the filter that fits (0 when the register
+  sets none, as in GPAC).
+- Ranking: priority, then size.
+
+**D13.5 — One matcher, two places.**
+`select.js` is the same file in the CLI and the registry (a test compares
+them), like `manifest.js`. The registry answers `GET|POST /-/select` (CORS `*`,
+GET with plain parameters for a player); the CLI runs the same function on
+`/accessors/index.json` when the registry predates the endpoint.
+
+## 14. Known limitations
 
 - **The registry image has not been built or deployed yet**; the default
   registry answers `503` until it is.

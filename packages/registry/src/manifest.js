@@ -65,6 +65,22 @@ export function validateManifest(m, { forPublish = false } = {}) {
   if (m.licence_required !== undefined && typeof m.licence_required !== 'boolean') errors.push('"licence_required" must be a boolean');
   if (m.georestrictions !== undefined && typeof m.georestrictions !== 'boolean' && !isStrArray(m.georestrictions)) errors.push('"georestrictions" must be false or an array of ISO country codes');
   if (m.priority !== undefined && !(Number.isInteger(m.priority) && m.priority >= 0 && m.priority <= 255)) errors.push('"priority" must be an integer in [0, 255] (lower = preferred)');
+  if (m.projects !== undefined && !isStrArray(m.projects)) errors.push('"projects" must list the upstream projects the module is built from (["ffmpeg"])');
+  if (m.project !== undefined && !isStr(m.project)) errors.push('"project" must be a string');
+  if (m.language !== undefined && !['wasm', 'js'].includes(m.language)) errors.push('"language" must be "wasm" or "js"');
+  if (m.runtime !== undefined) {
+    if (!m.runtime || typeof m.runtime !== 'object' || Array.isArray(m.runtime)) errors.push('"runtime" must map GPAC filter names to {outputs: [{property, format}]}');
+    else for (const [f, d] of Object.entries(m.runtime)) {
+      if (Array.isArray(m.filters) && !m.filters.includes(f)) warnings.push(`"runtime" declares "${f}", which is not in "filters"`);
+      for (const side of ['outputs', 'inputs']) {
+        if (d?.[side] === undefined) continue;
+        if (!Array.isArray(d[side]) || !d[side].every((c) => c && isStr(c.property) && (isStr(c.format) || isStrArray(c.format))))
+          errors.push(`"runtime.${f}.${side}" must be a list of {property, format}, format a GPAC name or a list of them`);
+      }
+    }
+  }
+  if (m.caps !== undefined && (!Array.isArray(m.caps) || !m.caps.every((c) => c && isStr(c.filter) && Array.isArray(c.bundles))))
+    errors.push('"caps" must list {filter, priority, bundles} (it is derived from the sources; do not write it by hand)');
   if (m.sources !== undefined && !isStr(m.sources)) errors.push('"sources" must be a URL string');
   if (m.homepage !== undefined && !isStr(m.homepage)) errors.push('"homepage" must be a URL string');
   if (m.main !== undefined && !isStr(m.main)) errors.push('"main" must be the path of the built .wasm');
@@ -115,14 +131,13 @@ export function normalizeManifest(m) {
     keywords: [],
     licence_required: false,
     georestrictions: false,
-    priority: 50,
     dependencies: {},
     ...m,
   };
 }
 
 // Fields that are meaningful once published (everything a consumer needs).
-export const PUBLIC_FIELDS = ['name', 'version', 'abi', 'module', 'description', 'filters', 'support', 'formats', 'extension', 'using', 'keywords', 'license', 'licence_required', 'georestrictions', 'priority', 'inputs', 'outputs', 'sources', 'homepage', 'filter_source', 'dependencies', 'help', 'author'];
+export const PUBLIC_FIELDS = ['name', 'version', 'abi', 'module', 'description', 'filters', 'support', 'formats', 'extension', 'using', 'keywords', 'license', 'licence_required', 'georestrictions', 'priority', 'caps', 'projects', 'language', 'inputs', 'outputs', 'sources', 'homepage', 'filter_source', 'dependencies', 'help', 'author'];
 
 export function publicManifest(m) {
   const out = {};

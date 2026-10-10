@@ -53,6 +53,8 @@ export async function run({ args, opts }) {
   if (m.derived?.version) console.log(color.dim(`  version ${m.version} = generation ${m.abi}, from ${m.derived.generation ?? 'the default'}`));
   console.log(color.dim(`  module ${m.main}`));
   if (m.derived?.license) console.log(color.dim(`  licence ${m.license}, from ${m.derived.license}`));
+  if (m.derived?.caps) console.log(color.dim(`  capabilities of ${m.caps.map((c) => `${c.filter} (priority ${c.priority})`).join(', ')}, from ${m.derived.caps}`));
+  if (m.derived?.projects) console.log(color.dim(`  projects ${m.projects.join(', ')}, from ${m.derived.projects}`));
   console.log(table(r.entries.map((e) => [color.dim(e.path), formatBytes(e.size)]), { indent: '  ' }));
   console.log(`  ${color.dim('tarball')} ${formatBytes(r.size)}`);
   try {

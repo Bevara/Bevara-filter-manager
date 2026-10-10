@@ -80,10 +80,11 @@ Optional fields, for new or updated manifests:
     "module": "theora",               // .wasm base name, when neither "name" nor add_filter() gives it
     "formats": ["Theora"],            // preferred spelling of "Format"
     "keywords": ["xiph", "ogg"],
-    "georestrictions": false,         // or ["US", "JP"]: territories where the codec may not be used
-    "priority": 50,                   // 0-255, lower = preferred by the resolver
-    "inputs":  [{ "stream_type": "visual", "codec": "theora" }],   // capability summary,
-    "outputs": [{ "stream_type": "visual", "codec": "raw" }],      // feeds /accessors/index.json
+    "georestrictions": false,         // or ["US", "JP"]: where the patent licence of "licence_required" applies
+    "runtime": {                      // formats a filter sets at run time, which its source cannot tell
+        "theoradec": { "outputs": [{ "property": "GF_PROP_PID_PIXFMT", "format": ["GF_PIXEL_YUV", "GF_PIXEL_YUV422"] }] }
+    },                                // bevara caps --write proposes them; see "Capabilities" below
+    "projects": ["gpac", "libtheora"],    // default: from the static libraries in lib/
     "dependencies": { "bevara:ogg": "^1.0.0" },   // accessors needed alongside (e.g. a demuxer)
 
     // build-time only, never published
@@ -101,6 +102,32 @@ indentation, compact arrays, spacing — stays byte for byte as it was.
 `bevara.json` is the manifest of a **site** (no filter name to put in a file
 name: see "Consumer projects" below). If a filter repository has one, it takes
 precedence over `<name>.json`.
+
+### Capabilities
+
+What each GPAC filter accepts and produces is **read from the C source** at
+publish (`bevara caps` shows it) and published as `caps`, one entry per filter:
+
+```jsonc
+"caps": [{
+  "filter": "jxldec", "priority": 0, "source": "dec_jxl.c",
+  "bundles": [{
+    "inputs":  [{ "property": "GF_PROP_PID_CODECID", "format": "GF_4CC('J','X','L',' ')" },
+                { "property": "GF_PROP_PID_UNFRAMED", "format": "GF_TRUE", "excluded": true }],
+    "outputs": [{ "property": "GF_PROP_PID_CODECID", "format": "GF_CODECID_RAW" }]
+  }],
+  "runtime": { "outputs": [{ "property": "GF_PROP_PID_PIXFMT", "format": "GF_PIXEL_RGB" },
+                           { "property": "GF_PROP_PID_PIXFMT", "format": "GF_PIXEL_RGBA", "declared": true }] }
+}],
+"priority": 0,          // the lowest of the filters' priorities
+"projects": ["gpac", "brotli", "highway", "libjxl"],
+"language": "wasm"
+```
+
+`priority` is the register's `.priority` (0 when unset, as in GPAC; lower is
+preferred). `runtime` merges the formats the code sets literally with those
+`<name>.json` declares (`"declared": true`). Never write `caps` by hand: the
+source is the reference. See DESIGN.md D13 and `GET /-/select` in REGISTRY_API.md.
 
 `name` and `filters` are required to publish. The compiled artifact must be a valid
 Wasm binary carrying a `dylink.0` (or `dylink`) custom section — the registry refuses
@@ -159,7 +186,7 @@ the signing key id and log position of each version, and the last verified log c
 |-----|---------|
 | `/accessors/<name>_<N>.wasm` | newest non-deprecated version of generation `N` (`Cache-Control: max-age=300`) |
 | `/accessors/<name>/<version>/<name>_<abi>.wasm` | exact version, immutable |
-| `/accessors/index.json` | machine-readable catalog with integrity hashes |
+| `/accessors/index.json` | machine-readable catalog with integrity hashes and capabilities (`caps`, `projects`, `language`) |
 | `/accessors/filter_list.json` | same shape as the `filter_list.json` of the filters repository |
 
 All are CORS-enabled and served brotli-compressed when the client accepts `br`.

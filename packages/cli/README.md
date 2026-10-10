@@ -4,12 +4,36 @@
 accessors (decoders, demultiplexers, encoders…) that the Bevara solver links at
 run time so a browser can play formats it does not support natively.
 
+## Install
+
+Requires **Node.js 20 or later** (`node --version`).
+
 ```bash
 npm install -g @bevara/cli
-bevara login      # the registry defaults to https://registry.bevara.ddns.net
+bevara --version
 ```
 
+Or run it without installing:
+
+```bash
+npx @bevara/cli --help
+```
+
+Update with `npm install -g @bevara/cli@latest`.
+
+Nothing to configure: the CLI talks to **https://registry.bevara.ddns.net**, and
+browsing, searching and installing filters need **no account**. An account is
+only needed to publish.
+
 ## Use filters on a web site
+
+```bash
+bevara probe movie.mkv                  # what the file holds, and the accessors it needs
+bevara update-page index.html           # shows how <img>/<video>/<audio> would become universal tags
+bevara update-page index.html --write --install   # apply it, and install those accessors
+```
+
+Or manage the accessors yourself:
 
 ```bash
 bevara install theora ogg vorbis   # -> accessors/theora_1.wasm …, bevara.json, bevara-lock.json
@@ -23,17 +47,52 @@ bevara update                      # within the semver ranges; --latest to cross
        with="ogg_1;vorbis_1;theora_1" controls></video>
 ```
 
+Or let the registry choose by capability — every accessor that accepts what
+the previous stage outputs, under priority, size, licence or project bounds:
+
+```bash
+bevara select -i PIXFMT=RGBA -p 50       # accepts raw RGBA, GPAC priority <= 50
+bevara select -i CODECID=JXL             # decodes JPEG XL
+bevara select query.json                 # the query format of the paper (bevara select --help)
+```
+
 ## Publish a filter
 
 ```bash
-bevara init        # bevara.json, CMakeLists.txt, src/<name>.c (GPAC filter skeleton)
-bevara build       # needs the Emscripten SDK and GPAC headers (GPAC_DIR)
-bevara publish     # signs the module with your Ed25519 key and uploads it
+bevara login                       # opens the registry's sign-in page in your browser
+cd my-filter-repository            # holds <name>.json, CMakeLists.txt and LICENCE
+bevara publish --build             # builds .bevara/.build/<name>_1.wasm, signs, uploads
 ```
+
+Building needs the **Emscripten SDK** activated (`source <emsdk>/emsdk_env.sh`);
+the Bevara filter repositories pin the version they need in
+`third_parties/emsdk_vers.txt`. The manifest is the repository's existing
+`<name>.json`: the version comes from the generation in `add_filter()` (the `_1`
+of the file name) and the licence from the `LICENCE` file. Any account can
+publish a new filter; afterwards only its owners publish new versions of it.
+
+What each GPAC filter accepts and produces, and its priority, are read from
+the C source at publish; `bevara caps` shows them, and `bevara caps --write`
+declares in `<name>.json` the output formats the code only chooses at run time.
+
+A new filter starts from `bevara init`, which writes `<name>.json`,
+`CMakeLists.txt`, `LICENCE` and a GPAC filter skeleton in `src/<name>.c`.
 
 Every publish is signed and appended to the registry's append-only, hash-chained
 log; `bevara install` verifies the signature over the downloaded bytes and
 `bevara audit` extends the checkpoint pinned in `bevara-lock.json`.
+
+## Test and measure a pipeline
+
+```bash
+bevara test clip.mp4 --accessors <dir>    # does this combination really decode the file?
+bevara bench clip.mp4 --accessors <dir> -W "isobmff_1;h264bsd_1" -W "isobmff_1;libde265_1"
+```
+
+These run the real pipeline and need the player's main module
+(`solver_1.js` and `solver_1.wasm`) in `<dir>`, next to the accessors.
+
+`bevara --help` lists every command; `bevara <command> --help` details one.
 
 Full documentation, the registry server and the Kubernetes manifests:
 <https://github.com/Bevara/Bevara-filter-manager>.
