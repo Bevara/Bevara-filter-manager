@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../../packages/registry"
 VERSION="${1:-$(node -p "require('./package.json').version")}"
-IMAGE="192.168.1.120:32000/bevara-registry:${VERSION}"
+IMAGE="localhost:32000/bevara-registry:${VERSION}"
 docker build --platform linux/amd64 -t "$IMAGE" .
 docker push "$IMAGE"
 echo "pushed $IMAGE"
