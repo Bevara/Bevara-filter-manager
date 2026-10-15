@@ -17,12 +17,24 @@ export class CliError extends Error {
   constructor(message, { exitCode = 1, hint } = {}) { super(message); this.exitCode = exitCode; this.hint = hint; }
 }
 
-export function table(rows, { header, indent = '' } = {}) {
+/* A text table. In a terminal, `shrink` names the columns that may be cut to
+ * fit its width (the widest first, never below `minWidth`), each cut cell
+ * ending in "…": a line wider than the terminal would wrap and break the
+ * columns. Piped output keeps every character. */
+export function table(rows, { header, indent = '', shrink = [], maxWidth = process.stdout.isTTY ? process.stdout.columns : Infinity, minWidth = 8 } = {}) {
   const all = header ? [header, ...rows] : rows;
   if (!all.length) return '';
   const widths = [];
   for (const r of all) r.forEach((cell, i) => { widths[i] = Math.max(widths[i] ?? 0, strip(String(cell ?? '')).length); });
-  const fmt = (r) => indent + r.map((cell, i) => { const s = String(cell ?? ''); return s + ' '.repeat(widths[i] - strip(s).length); }).join('  ').trimEnd();
+  const total = () => indent.length + widths.reduce((a, w) => a + w, 0) + 2 * (widths.length - 1);
+  const limit = Number.isFinite(maxWidth) && maxWidth > 0 ? maxWidth : Infinity;
+  while (total() > limit) {
+    const i = shrink.filter((c) => widths[c] > Math.max(minWidth, strip(String(header?.[c] ?? '')).length)).sort((a, b) => widths[b] - widths[a])[0];
+    if (i === undefined) break;
+    widths[i] -= Math.min(total() - limit, widths[i] - Math.max(minWidth, strip(String(header?.[i] ?? '')).length));
+  }
+  const cut = (s, w) => { const plain = strip(s); return plain.length <= w ? s : plain.slice(0, Math.max(0, w - 1)) + '…'; };
+  const fmt = (r) => indent + r.map((cell, i) => { const s = cut(String(cell ?? ''), widths[i]); return s + ' '.repeat(Math.max(0, widths[i] - strip(s).length)); }).join('  ').trimEnd();
   const lines = all.map(fmt);
   if (header) lines.splice(1, 0, indent + widths.map((w) => '─'.repeat(w)).join('  '));
   return lines.join('\n');

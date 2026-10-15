@@ -299,7 +299,12 @@ registry lacks, or a registry with no runtime at all, are reported as such
 (not as a conflict), and an accessor without `"using"` is flagged. `test` and
 `bench` refuse a combination (automatic or `-W`) whose installed accessors
 share no runtime, and run it with one they share (`--solver` must be one).
-`bevara filters` (alias `list`) lists the filters only, with their runtimes - in red when the
+Among accessors, one that declares the format MediaInfo names comes before
+one whose extension merely matches, and the runtime chosen is the one under
+which the fewest needs rest on an extension (a .opus gets the Ogg demultiplexer
+under solver_minimal_1, not the Opus decoder alone under solver_1); a stream
+MediaInfo does not name falls back on the file's extension (the audio of a
+.mod). `bevara filters` (alias `list`) lists the filters only, with their runtimes - in red when the
 registry does not publish them - and in a site the `using="…"` they all share;
 `bevara runtimes` lists the runtimes: the `using=` name, the built-in filters
 and how many filters link against each. Both show the Emscripten version each

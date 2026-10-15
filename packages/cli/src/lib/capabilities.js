@@ -36,7 +36,9 @@ export function needsOf(tracks, { ext = '' } = {}) {
   if (container && !elementary && !SOLVER_CONTAINERS.has(key(container))) needs.push({ role: 'demux', format: container, ext, byExtension: true });
   for (const s of streams) {
     const type = STREAM_TYPES[s['@type']];
-    if (!s.Format) { needs.push({ role: 'decode', type, format: null, unidentified: true }); continue; }
+    // A stream MediaInfo does not name (the audio of a .mod): only the file's
+    // extension can say which accessor plays it.
+    if (!s.Format) { needs.push({ role: 'decode', type, format: null, unidentified: true, ext, byExtension: true }); continue; }
     if (needs.some((n) => n.role === 'decode' && key(n.format) === key(s.Format))) continue;
     needs.push({ role: 'decode', type, format: s.Format, profile: s.Format_Profile, ext, byExtension: elementary });
   }
@@ -56,14 +58,16 @@ export function describeNeed(n) {
   return `${ROLE_LABEL[n.role]} ${n.format}`;
 }
 
+/* How an accessor answers a need: 'format' (it declares the format MediaInfo
+ * names), 'extension' (only the file's extension matches), or false. */
 function fits(entry, need) {
-  if (need.role === 'encode') return entry.file === `${need.module}.wasm`;
-  if (need.format && (entry.formats ?? []).some((f) => key(f) === key(need.format))) return true;
+  if (need.role === 'encode') return entry.file === `${need.module}.wasm` ? 'format' : false;
+  if (need.format && (entry.formats ?? []).some((f) => key(f) === key(need.format))) return 'format';
   if (!need.byExtension || !need.ext) return false;
   // Before "extension" was published, a manifest without "Format" had its
   // extension keys published as "formats": they still name extensions.
   const exts = entry.extension ? Object.keys(entry.extension) : entry.formats ?? [];
-  return exts.some((e) => key(e) === key(need.ext));
+  return exts.some((e) => key(e) === key(need.ext)) ? 'extension' : false;
 }
 
 /* An accessor is a side module: it links against the solver the page loads
@@ -83,14 +87,20 @@ export const KNOWN_SOLVERS = ['solver_minimal_1', 'solver_1'];
 export function resolveNeeds(needs, index, { solver } = {}) {
   const entries = (index?.filters ?? []).map((e) => ({ ...e, module: e.file.replace(/\.wasm$/, '') }))
     .filter((e) => !solver || fitsSolver(e, solver));
+  // An accessor that declares the format comes before one whose extension
+  // merely matches: the Ogg demultiplexer, not the Opus decoder, reads a .opus.
+  const rank = { format: 0, extension: 1 };
   const resolved = needs.map((need) => {
-    const candidates = need.unidentified ? [] : entries.filter((e) => fits(e, need))
-      .sort((a, b) => (a.priority ?? 50) - (b.priority ?? 50) || a.module.localeCompare(b.module));
+    const candidates = entries.map((e) => ({ ...e, match: fits(e, need) })).filter((e) => e.match)
+      .sort((a, b) => rank[a.match] - rank[b.match] || (a.priority ?? 50) - (b.priority ?? 50) || a.module.localeCompare(b.module));
     return { ...need, candidates, chosen: candidates[0] ?? null };
   });
   const withList = [];
   for (const n of resolved) if (n.chosen && !withList.includes(n.chosen.module)) withList.push(n.chosen.module);
-  return { needs: resolved, with: withList, missing: resolved.filter((n) => !n.chosen) };
+  // Needs MediaInfo named but only an extension answered: what tells a good
+  // resolution from a makeshift one.
+  const byExtension = resolved.filter((n) => n.format && n.chosen?.match === 'extension').length;
+  return { needs: resolved, with: withList, missing: resolved.filter((n) => !n.chosen), byExtension };
 }
 
 /* The runtimes the registry publishes (its index lists them), or null for a
@@ -125,7 +135,10 @@ export function solverOrder(index, prefer) {
  */
 export function resolvePipeline(needs, index, { prefer } = {}) {
   const bySolver = new Map(solverOrder(index, prefer).map((s) => [s, resolveNeeds(needs, index, { solver: s })]));
-  const fitsAll = [...bySolver].filter(([, r]) => !r.missing.length).map(([s]) => s);
+  // Every solver that serves all needs, the one that answers them by format
+  // rather than by extension first (then in solverOrder).
+  const fitsAll = [...bySolver].filter(([, r]) => !r.missing.length).map(([s]) => s)
+    .map((s, i) => ({ s, i, ext: bySolver.get(s).byExtension })).sort((a, b) => a.ext - b.ext || a.i - b.i).map((x) => x.s);
   if (fitsAll.length) {
     const r = bySolver.get(fitsAll[0]);
     return { ...r, using: fitsAll[0], fits: fitsAll, bySolver, conflict: null, unpublishedRuntimes: null,

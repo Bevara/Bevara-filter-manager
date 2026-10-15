@@ -125,7 +125,7 @@ async function listRemote(project, opts, what) {
       const row = [t.deprecated ? color.yellow(t.name) : color.bold(t.name), t.latest ?? '', (t.tags ?? []).map((x) => x.replace(/\.js$/, '')).join(', '), ext || color.dim('-'), (t.description ?? '').slice(0, 50)];
       if (opts.long) row.push(t.license ?? '', String(t.downloads));
       return row;
-    }), { header: theader.map(color.bold) }));
+    }), { header: theader.map(color.bold), shrink: [2, 3, 4, 5] }));
     return;
   }
   if (what === 'runtimes') {
@@ -139,7 +139,7 @@ async function listRemote(project, opts, what) {
       const row = [r.deprecated ? color.yellow(r.name) : color.bold(r.name), r.latest ?? '', `${r.name.split(':').pop()}_${r.abi ?? 1}`, r.emsdk ?? color.dim('?'), (r.builtins ?? []).join(','), `${used(r)} filter${used(r) === 1 ? '' : 's'}`];
       if (opts.long) row.push(formatBytes(r.size), formatBytes(r.brSize), r.license ?? '', String(r.downloads));
       return row;
-    }), { header: rheader.map(color.bold) }));
+    }), { header: rheader.map(color.bold), shrink: [4, 8] }));
     return;
   }
 
@@ -150,7 +150,7 @@ async function listRemote(project, opts, what) {
     const row = [f.deprecated ? color.yellow(f.name) : color.bold(f.name), f.latest ?? '', (f.description ?? '').slice(0, 60), (f.formats ?? []).join(','), (f.support ?? []).join(','), runtimeCell(f), f.emsdk ?? color.dim('?')];
     if (opts.long) row.push(formatBytes(f.size), formatBytes(f.brSize), (f.license ?? '') + (f.licence_required ? '*' : ''), String(f.downloads));
     return row;
-  }), { header: header.map(color.bold) }));
+  }), { header: header.map(color.bold), shrink: [2, 3, 4, 5, 9] }));
 
   if (known && !runtimes.length) console.log(color.dim('\nno runtime published: filters cannot be loaded until one is (bevara publish --build in a solver directory)'));
   if (!known) console.log(color.dim('\nthis registry predates runtime packages: "Runtimes" is unknown'));

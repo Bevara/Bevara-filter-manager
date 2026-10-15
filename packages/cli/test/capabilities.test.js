@@ -198,3 +198,29 @@ describe('a combination shares a runtime', async () => {
     fsm.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('matching prefers a declared format to a matching extension', async () => {
+  const { needsOf, resolvePipeline } = await import('../src/lib/capabilities.js');
+  const index = {
+    filters: [
+      { name: 'bevara:ogg', file: 'ogg_1.wasm', formats: ['Ogg'], extension: { ogg: 'audio' }, using: ['solver_minimal_1'] },
+      { name: 'bevara:libopus', file: 'libopus_1.wasm', formats: ['opus'], extension: { opus: 'audio' }, using: ['solver_minimal_1', 'solver_1'] },
+      { name: 'bevara:libxmp', file: 'libxmp_1.wasm', formats: ['mod', 'xm'], extension: { mod: 'audio', xm: 'audio' }, using: ['solver_1'] },
+    ],
+    runtimes: [{ module: 'solver_1' }, { module: 'solver_minimal_1' }],
+  };
+
+  test('an Ogg Opus file gets the Ogg demultiplexer, under the solver that has it', () => {
+    const needs = needsOf([{ '@type': 'General', Format: 'Ogg' }, { '@type': 'Audio', Format: 'Opus' }], { ext: 'opus' });
+    const r = resolvePipeline(needs, index, { prefer: 'solver_1' });
+    assert.deepEqual(r.with, ['ogg_1', 'libopus_1']);
+    assert.equal(r.using, 'solver_minimal_1');
+  });
+
+  test('a stream MediaInfo does not name falls back on the file extension', () => {
+    const needs = needsOf([{ '@type': 'General', Format: 'Module' }, { '@type': 'Audio' }], { ext: 'mod' });
+    const r = resolvePipeline(needs, index, { prefer: 'solver_1' });
+    assert.deepEqual(r.missing, []);
+    assert.deepEqual(r.with, ['libxmp_1']);
+  });
+});
