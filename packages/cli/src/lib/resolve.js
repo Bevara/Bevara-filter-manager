@@ -111,14 +111,27 @@ export async function installResolved(client, project, chosen, { registry, quiet
       if (got !== doc.dist.integrity) throw new CliError(`integrity check failed for ${name}@${version}: expected ${doc.dist.integrity}, got ${got}`);
       signature = checkSignature(name, version, doc, digest.toString('hex'));
       if (!signature && !quiet) log.warn(`${name}@${version} is not signed by its publisher`);
+      // A runtime brings its JavaScript, covered by the same signed record.
+      let jsBuf = null;
+      if (doc.dist.js) {
+        jsBuf = await client.download(doc.dist.js);
+        const jsDigest = createHash('sha256').update(jsBuf).digest();
+        if ('sha256-' + jsDigest.toString('base64') !== doc.dist.jsIntegrity) throw new CliError(`integrity check failed for ${name}@${version} (${doc.dist.jsFile})`);
+        if (doc.signature && doc.signature.record.jsSha256 !== jsDigest.toString('hex')) throw new CliError(`${name}@${version}: signed record does not describe ${doc.dist.jsFile}`);
+      }
       // Remove a previous build of the same filter from another generation (_1, _2…).
-      if (lockEntry?.file && lockEntry.file !== doc.dist.file) fs.rmSync(path.join(project.accessorsDir, lockEntry.file), { force: true });
+      if (lockEntry?.file && lockEntry.file !== doc.dist.file) {
+        fs.rmSync(path.join(project.accessorsDir, lockEntry.file), { force: true });
+        if (lockEntry.jsFile) fs.rmSync(path.join(project.accessorsDir, lockEntry.jsFile), { force: true });
+      }
       fs.writeFileSync(target, buf);
+      if (jsBuf) fs.writeFileSync(path.join(project.accessorsDir, doc.dist.jsFile), jsBuf);
       fs.writeFileSync(path.join(project.accessorsDir, `${shortName(name)}.json`), JSON.stringify(stripDist(doc), null, 2) + '\n');
       installed.push({ name, version, from: lockEntry?.version ?? null });
     }
     project.lock.filters[name] = {
       version, abi: doc.abi, file: doc.dist.file, integrity: doc.dist.integrity, resolved: doc.dist.wasm,
+      ...(doc.dist.jsFile ? { jsFile: doc.dist.jsFile, jsIntegrity: doc.dist.jsIntegrity } : {}),
       license: doc.license, dependencies: doc.dependencies ?? {}, signature,
     };
     if (packument?.deprecated && !quiet) log.warn(`${name} is deprecated: ${packument.deprecated}`);

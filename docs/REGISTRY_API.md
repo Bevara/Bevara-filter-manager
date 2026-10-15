@@ -102,6 +102,20 @@ the name.
 ## Accessors (for players, CORS `*`)
 See PACKAGE_FORMAT.md — `/accessors/<name>_<abi>.wasm`, `/accessors/<name>/<version>/<file>`, `/accessors/index.json`, `/accessors/filter_list.json`.
 
+## Runtimes (solvers)
+A runtime is a package whose manifest says `"kind": "runtime"`: published with
+the same `PUT /filters/:name/:version`, its tarball holds `package/<name>_<N>.wasm`
+**and** `package/<name>_<N>.js`, and its signed record adds `jsSha256`. Its
+version document has `dist.jsFile`, `dist.js`, `dist.jsIntegrity`;
+`/accessors/<name>_<N>.js` and `/accessors/<name>/<version>/<name>_<N>.js` serve
+the JavaScript. `/accessors/index.json` lists runtimes under `runtimes`
+(`module`, `file`, `url`, `integrity`, `js`, `jsUrl`, `jsIntegrity`, `builtins`…),
+not under `filters`.
+
+Publishing a filter requires `"using"`, and at least one runtime it names
+published here: otherwise `400` (`none of the runtimes in "using" … is
+published`); the ones missing are returned as `warnings`.
+
 ## Selection (no auth, CORS `*`)
 Capability-driven selection (paper, Section 5; DESIGN.md D13): every accessor
 whose declared inputs accept the query's, under side conditions.

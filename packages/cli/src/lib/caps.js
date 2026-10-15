@@ -379,6 +379,7 @@ export function runtimeDeclarations(manifest, unresolved) {
  * "projects" list in the manifest replaces this. */
 const RUNTIME_LIBS = /^lib(c|c\+\+|c\+\+abi|m|pthread|compiler_rt|dl|rt|stdc\+\+)$/;
 const LIB_PROJECT = {
+  libgpac_static: 'gpac', libgpac: 'gpac',
   libavcodec: 'ffmpeg', libavformat: 'ffmpeg', libavutil: 'ffmpeg', libavfilter: 'ffmpeg', libswscale: 'ffmpeg', libswresample: 'ffmpeg', libavdevice: 'ffmpeg',
   libbrotlicommon: 'brotli', libbrotlidec: 'brotli', libbrotlienc: 'brotli', libhwy: 'highway',
   libpng16: 'libpng', libopenjp2: 'openjpeg', libflac: 'flac', libwebpdecoder: 'libwebp', libxvidcore: 'xvid',
@@ -399,4 +400,15 @@ export function projectsOf(root) {
     out.add(LIB_PROJECT[base] ?? base);
   }
   return [...out];
+}
+
+/* The GPAC filters a solver registers itself, from its loader.js
+ * (Module._fin_register…, registered with addFunction): what an accessor need
+ * not bring. */
+export function runtimeBuiltins(root) {
+  let text;
+  try { text = fs.readFileSync(path.join(root, 'loader.js'), 'utf8'); } catch { return null; }
+  const names = new Set();
+  for (const m of text.matchAll(/\b_([a-z0-9]+)_register\b/g)) if (m[1] !== 'auto') names.add(m[1]);
+  return [...names].sort();
 }

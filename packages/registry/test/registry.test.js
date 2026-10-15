@@ -4,8 +4,8 @@ import path from 'node:path';
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { startRegistry, makeTarball, manifest, signup, publish, keys, FIXTURE_WASM } from './helpers.js';
-import { generateKeyPair, verifyChain, verifyRecord, keyIdOf } from '../src/sig.js';
+import { startRegistry, makeTarball, manifest, runtimeManifest, RUNTIME_JS, signup, publish, keys, FIXTURE_WASM } from './helpers.js';
+import { generateKeyPair, verifyChain, verifyRecord, keyIdOf, canonicalize, signRecord } from '../src/sig.js';
 
 describe('registry', () => {
   let reg, api, alice, bob;
@@ -86,8 +86,9 @@ describe('registry', () => {
     assert.equal(r.data.name, 'bevara:dummy');
     assert.equal(r.data.dist.file, 'dummy_1.wasm');
     assert.equal(r.data.signature.keyId, keys.get(alice).keyId);
-    assert.equal(r.data.signature.logSeq, 1);
-    assert.equal(r.data.checkpoint.seq, 1);
+    // Entry #1 is the runtime solver_1 that "using" names, published first.
+    assert.equal(r.data.signature.logSeq, 2);
+    assert.equal(r.data.checkpoint.seq, 2);
     const sha = createHash('sha256').update(FIXTURE_WASM).digest('base64');
     assert.equal(r.data.dist.integrity, `sha256-${sha}`);
 
@@ -117,7 +118,7 @@ describe('registry', () => {
     const idx = await api('GET', '/accessors/index.json');
     assert.equal(idx.data.filters[0].file, 'dummy_1.wasm');
     assert.equal(idx.data.filters[0].name, 'bevara:dummy');
-    assert.equal(idx.data.checkpoint.seq, 1);
+    assert.equal(idx.data.checkpoint.seq, 2);        // the runtime, then dummy
     assert.equal((await api('GET', '/accessors/bevara:dummy_1.wasm')).status, 200);
     assert.equal((await api('GET', '/accessors/bevara%3Adummy/1.0.0/dummy_1.wasm')).status, 200);
 
@@ -147,8 +148,9 @@ describe('registry', () => {
 
   test('search and filtering', async () => {
     await publish(api, alice, manifest({ name: 'other', description: 'Other audio thing', support: ['audio'], formats: ['Other'] }));
-    assert.equal((await api('GET', '/filters')).data.total, 2);
-    assert.equal((await api('GET', '/filters?namespace=bevara')).data.total, 2);
+    // The runtime solver is a package too.
+    assert.equal((await api('GET', '/filters')).data.total, 3);
+    assert.equal((await api('GET', '/filters?namespace=bevara')).data.total, 3);
     assert.equal((await api('GET', '/filters?q=audio')).data.filters[0].name, 'bevara:other');
     assert.equal((await api('GET', '/filters?support=video')).data.total, 1);
     assert.equal((await api('GET', '/filters?format=dummy')).data.total, 1);
@@ -275,8 +277,8 @@ describe('registry', () => {
     assert.equal(chain.seq, checkpoint.seq);
     const { signature, publicKey, ...body } = checkpoint;
     assert.equal(verifyRecord(body, signature, publicKey), true);
-    // inclusion proof for entry 1 lets a client recompute the head
-    const proof = (await api('GET', '/-/log/1')).data;
+    // inclusion proof for entry 2 (after the runtime) lets a client recompute the head
+    const proof = (await api('GET', '/-/log/2')).data;
     assert.equal(proof.record.name, 'bevara:dummy');
     let h = proof.hash;
     const { entryHashFromDigest } = await import('../src/sig.js');
@@ -315,7 +317,7 @@ describe('registry', () => {
     const small = await startRegistry({ maxTarball: 64 });
     try {
       const token = await signup(small.api, 'dave');
-      const r = await publish(small.api, token, manifest({ name: 'dave:big' }));
+      const r = await publish(small.api, token, manifest({ name: 'dave:big' }), { runtimes: false });
       assert.equal(r.status, 413);
       assert.match(r.data.error, /limit/);
     } finally { await small.close(); }
@@ -433,7 +435,8 @@ describe('registry with optional signatures', () => {
       const r = await publish(reg.api, t, manifest({ name: 'carol:x' }), { sign: false });
       assert.equal(r.status, 201);
       assert.equal(r.data.signature, null);
-      assert.equal((await reg.api('GET', '/-/log/checkpoint')).data.seq, 0);
+      // Only the (signed) runtime it names is in the log, not the unsigned filter.
+      assert.ok(!(await reg.api('GET', '/-/log?since=0')).data.entries.some((e) => e.record.name === 'carol:x'));
     } finally { await reg.close(); }
   });
 });
@@ -511,5 +514,63 @@ describe('selection by capability (/-/select)', () => {
     assert.equal(e.caps[0].filter, 'rgbenc');
     assert.deepEqual(e.projects, ['gpac', 'libpng']);
     assert.equal(e.language, 'wasm');
+  });
+});
+
+describe('runtimes (solvers) as packages', () => {
+  let reg, root, alice, bob;
+  before(async () => {
+    reg = await startRegistry();
+    root = await signup(reg.api, 'root');     // the first account administers the registry
+    alice = await signup(reg.api, 'alice');
+    bob = await signup(reg.api, 'bob');
+    void root;
+  });
+  after(() => reg.close());
+
+  test('a filter cannot be published before the runtime its "using" names', async () => {
+    const r = await publish(reg.api, alice, manifest({ name: 'early', filters: ['earlydec'], using: ['solver_minimal_1'] }), { runtimes: false });
+    assert.equal(r.status, 400);
+    assert.match(r.data.error, /none of the runtimes in "using" \(solver_minimal_1\) is published/);
+    const none = await publish(reg.api, alice, manifest({ name: 'nousing', filters: ['nousingdec'], using: undefined }), { runtimes: false });
+    assert.equal(none.status, 400);
+    assert.ok(none.data.errors.some((e) => /"using" must list the runtimes/.test(e)));
+  });
+
+  test('any account publishes a runtime; its owners only publish new versions', async () => {
+    const r = await publish(reg.api, bob, runtimeManifest({ name: 'solver_minimal' }));
+    assert.equal(r.status, 201, JSON.stringify(r.data));
+    const other = await publish(reg.api, alice, runtimeManifest({ name: 'solver_minimal', version: '1.0.1' }));
+    assert.equal(other.status, 403);
+    // A runtime has the .js too, and no "using".
+    const bad = await publish(reg.api, bob, runtimeManifest({ name: 'solver_bad', using: ['solver_1'] }));
+    assert.equal(bad.status, 400);
+  });
+
+  test('then the filter publishes, and pages get the solver from /accessors/ as .js and .wasm', async () => {
+    // One published runtime is enough; the others are reported.
+    const r = await publish(reg.api, alice, manifest({ name: 'early', filters: ['earlydec'], using: ['solver_minimal_1', 'solver_other_1'] }), { runtimes: false });
+    assert.equal(r.status, 201, JSON.stringify(r.data));
+    assert.ok(r.data.warnings.some((w) => /solver_other_1: not published here/.test(w)));
+    const js = await reg.api('GET', '/accessors/solver_minimal_1.js');
+    assert.equal(js.status, 200);
+    assert.match(js.headers.get('content-type'), /javascript/);
+    assert.equal(js.data, RUNTIME_JS.toString());
+    assert.equal((await reg.api('GET', '/accessors/solver_minimal_1.wasm')).status, 200);
+    assert.equal((await reg.api('GET', '/accessors/early_1.js')).status, 404);
+    const doc = await reg.api('GET', '/filters/solver_minimal/1.0.0');
+    assert.equal(doc.data.kind, 'runtime');
+    assert.equal(doc.data.dist.jsFile, 'solver_minimal_1.js');
+    assert.equal((await reg.api('GET', doc.data.dist.js.replace(reg.base, ''))).status, 200);
+  });
+
+  test('the index lists runtimes apart from accessors', async () => {
+    const { data } = await reg.api('GET', '/accessors/index.json');
+    assert.deepEqual(data.runtimes.map((r) => [r.module, r.js]), [['solver_minimal_1', 'solver_minimal_1.js']]);
+    assert.ok(!data.filters.some((f) => f.name === 'bevara:solver_minimal'));
+    assert.ok(data.filters.some((f) => f.name === 'bevara:early'));
+    // A runtime's name is an accessor name like any other: no filter can take it.
+    const clash = await publish(reg.api, alice, manifest({ name: 'solver_minimal', filters: ['x'], using: ['solver_minimal_1'] }), { runtimes: false });
+    assert.equal(clash.status, 403);
   });
 });

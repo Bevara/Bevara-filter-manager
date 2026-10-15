@@ -241,3 +241,11 @@ describe('naming the project and the build directory', async () => {
     assert.equal(fs.realpathSync(cwd), fs.realpathSync(d));
   });
 });
+
+test('no manifest: a <name>.json naming another filter is pointed at', async () => {
+  const { Project } = await import('../src/lib/project.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-near-'));
+  fs.writeFileSync(path.join(dir, 'ogg.json'), JSON.stringify({ name: 'oggdmx', filters: ['oggdmx'] }));
+  assert.throws(() => Project.load({ dir }), (e) => /ogg\.json .* names the filter "oggdmx", not "ogg"/.test(e.message) && /set "name": "ogg"/.test(e.hint));
+  fs.rmSync(dir, { recursive: true, force: true });
+});

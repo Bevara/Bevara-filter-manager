@@ -5,9 +5,9 @@ import { execSync, spawn } from 'node:child_process';
 import * as tar from 'tar';
 import { inspectWasm, accessorFileName } from './wasm.js';
 import { validateManifest, normalizeManifest, fromLegacy, shortName } from './manifest.js';
-import { addFilterFor } from './cmake.js';
+import { addFilterFor, executableFor } from './cmake.js';
 import { licenceFromRepository, LICENCE_FILES } from './license.js';
-import { extractCaps, projectsOf } from './caps.js';
+import { extractCaps, projectsOf, runtimeBuiltins } from './caps.js';
 import { activeEmsdk, expectedEmsdk, resetIfOtherToolchain, diagnoseBuildFailure, sdkOf } from './emsdk.js';
 import { CliError, log, color } from './ui.js';
 
@@ -54,18 +54,21 @@ export function filterManifest(project, { buildDir: requested } = {}) {
     m.name = m.name.toLowerCase();
     derived.module = `"name" in ${project.manifestName}`;
   }
-  const call = short ? addFilterFor(project.root, short) : null;
+  // A runtime (a solver) is an add_executable(<name>_${VERSION}); a filter an add_filter().
+  const runtime = m.kind === 'runtime';
+  const call = short ? (runtime ? executableFor(project.root, short) : addFilterFor(project.root, short)) : null;
+  const via = runtime ? 'add_executable' : 'add_filter';
   if (call?.name && short && call.name.toLowerCase() !== short.toLowerCase()) {
-    derived.notes.push(`CMakeLists.txt builds ${call.name}_${call.rawGeneration ?? '?'}.wasm (add_filter, line ${call.line}) but ${project.manifestName} names the filter "${short}"`);
+    derived.notes.push(`CMakeLists.txt builds ${call.name}_${call.rawGeneration ?? '?'}.wasm (${via}, line ${call.line}) but ${project.manifestName} names the ${runtime ? 'runtime' : 'filter'} "${short}"`);
   } else if (call?.name && !m.module && call.name !== short) {
     m.module = call.name;
-    derived.module = `add_filter in CMakeLists.txt, line ${call.line}`;
+    derived.module = `${via} in CMakeLists.txt, line ${call.line}`;
   }
 
   if (m.abi === undefined) {
     const fromMain = typeof m.main === 'string' ? /_(\d+)\.wasm$/.exec(m.main) : null;
     if (fromMain) { m.abi = parseInt(fromMain[1], 10); derived.generation = `"main" in ${project.manifestName}`; }
-    else if (call?.generation != null) { m.abi = call.generation; derived.generation = `add_filter in CMakeLists.txt, line ${call.line}`; }
+    else if (call?.generation != null) { m.abi = call.generation; derived.generation = `${via} in CMakeLists.txt, line ${call.line}`; }
     else {
       const built = builtGenerations(project.root, requested ? [buildDir, '.'] : [buildDir, ...FALLBACK_BUILD_DIRS], m.module ?? short);
       if (built.length === 1) { m.abi = built[0]; derived.generation = `the built module in ${buildDir}`; }
@@ -102,6 +105,10 @@ export function filterManifest(project, { buildDir: requested } = {}) {
       derived.notes.push(`${u.filter} sets ${u.property} from ${u.expression} at run time (${u.file}:${u.line}): declare the formats in "runtime" (bevara caps --write)`);
     }
     derived.notes.push(...found.notes.filter((x) => !/ registers it as /.test(x)));
+  }
+  if (runtime && m.builtins === undefined) {
+    const builtins = runtimeBuiltins(project.root);
+    if (builtins) { m.builtins = builtins; derived.builtins = 'loader.js'; }
   }
   if (m.projects === undefined) {
     if (typeof m.project === 'string') m.projects = [m.project];
@@ -208,14 +215,21 @@ export function checkArtifact(project, m) {
   const info = inspectWasm(buf);
   if (!info.valid) throw new CliError(`${m.main}: ${info.error}`);
   if (!info.sideModule) throw new CliError(`${m.main} is not an Emscripten side module (no dylink section)`, { hint: 'link with -sSIDE_MODULE=2 (see the generated filters.cmake)' });
-  return { file, buf, info };
+  // A runtime's JavaScript loads its .wasm: they are built, and shipped, together.
+  let js = null;
+  if (m.kind === 'runtime') {
+    const jsFile = file.replace(/\.wasm$/, '.js');
+    if (!fs.existsSync(jsFile)) throw new CliError(`${path.basename(jsFile)} not found next to ${m.main}`, { hint: 'a runtime is built as <name>_<N>.js and <name>_<N>.wasm (-sMODULARIZE): rebuild it' });
+    js = fs.readFileSync(jsFile);
+  }
+  return { file, buf, info, js };
 }
 
 // Creates <name>-<version>.tgz with the npm-style "package/" prefix:
 //   package/bevara.json, package/<name>_<abi>.wasm, docs and "files" entries.
 export async function packFilter(project, { outDir = project.root, dryRun = false, buildDir } = {}) {
   const m = checkFilterManifest(project, { buildDir });
-  const { buf } = checkArtifact(project, m);
+  const { buf, js } = checkArtifact(project, m);
   const stageRoot = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'bevara-pack-'));
   const stage = path.join(stageRoot, 'package');
   fs.mkdirSync(stage);
@@ -227,6 +241,7 @@ export async function packFilter(project, { outDir = project.root, dryRun = fals
   const { main, mainDefaulted, mainCandidates, derived, scripts, accessorsDir, registry, Format, runtime, project: _project, ...published } = m;
   add('bevara.json', Buffer.from(JSON.stringify(published, null, 2) + '\n'));
   add(accessorFileName(m.name, m.abi, m.module), buf);
+  if (js) add(accessorFileName(m.name, m.abi, m.module).replace(/\.wasm$/, '.js'), js);
   const extra = new Set([...ALWAYS_INCLUDE, ...(m.files ?? [])]);
   for (const rel of extra) {
     const src = path.resolve(project.root, rel);
@@ -242,7 +257,7 @@ export async function packFilter(project, { outDir = project.root, dryRun = fals
     await tar.create({ gzip: true, cwd: stageRoot, file: tgzPath, portable: true, mtime: new Date('2000-01-01T00:00:00Z') }, ['package']);
   }
   fs.rmSync(stageRoot, { recursive: true, force: true });
-  return { manifest: m, tgzPath, tgzName, entries, size: dryRun ? null : fs.statSync(tgzPath).size, wasmBuffer: buf };
+  return { manifest: m, tgzPath, tgzName, entries, size: dryRun ? null : fs.statSync(tgzPath).size, wasmBuffer: buf, jsBuffer: js };
 }
 
 function* walk(dir) {

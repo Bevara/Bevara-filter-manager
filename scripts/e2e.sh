@@ -12,7 +12,7 @@ export BEVARA_REGISTRY="http://127.0.0.1:$PORT"
 export BEVARA_PASSWORD="password123"
 export NO_COLOR=1
 
-cleanup() { kill "$REG_PID" 2>/dev/null || true; rm -rf "$WORK"; }
+cleanup() { kill "$REG_PID" 2>/dev/null || true; [ -n "${KEEP_WORK:-}" ] && echo "kept $WORK" || rm -rf "$WORK"; }
 trap cleanup EXIT
 
 PORT=$PORT DATA_DIR="$WORK/data" node "$ROOT/packages/registry/src/server.js" >"$WORK/registry.log" 2>&1 &
@@ -29,6 +29,16 @@ $BEVARA ping
 $BEVARA adduser -u alice -e alice@example.org
 $BEVARA whoami | grep -q alice
 
+step "publish the runtime solver_1 that filters name in \"using\" (required, and checked by the registry)"
+mkdir -p "$WORK/solver" && cd "$WORK/solver"
+printf '{ "name": "solver", "kind": "runtime", "description": "Test solver" }\n' > solver.json
+printf 'cmake_minimum_required(VERSION 3.7)\nset(VERSION "1")\nadd_executable(solver_${VERSION} gpac.c)\n' > CMakeLists.txt
+printf 'Module._fin_register; Module._fout_register;\n' > loader.js
+printf 'SPDX-License-Identifier: LGPL-2.1-or-later\n' > LICENCE
+mkdir -p .bevara/.build && cp "$FIXTURE" .bevara/.build/solver_1.wasm && printf 'var libgpac=()=>{};\n' > .bevara/.build/solver_1.js
+$BEVARA publish -y | grep 'runtime with built-in filters fin, fout' >/dev/null
+curl -fs -o /dev/null -w '%{http_code} %{content_type}\n' "$BEVARA_REGISTRY/accessors/solver_1.js" | grep -q '200 text/javascript'
+
 step "init a filter (non-interactive) and fake the build with the fixture"
 mkdir -p "$WORK/dummy" && cd "$WORK/dummy"
 $BEVARA init -y -n dummy
@@ -41,11 +51,11 @@ mkdir -p build && cp "$FIXTURE" build/dummy_1.wasm
 
 step "pack --dry-run, publish (signs with an auto-generated key, appended to the log)"
 $BEVARA pack --dry-run
-$BEVARA publish -y | grep 'log #1' >/dev/null
+$BEVARA publish -y | grep 'log #2' >/dev/null       # #1 is the runtime
 $BEVARA key ls | grep -q active
 $BEVARA key show | grep -q '^sha256:'
 $BEVARA log | grep -q 'bevara:dummy@1.0.0'
-$BEVARA log --verify | grep -q 'verified 1 entry'
+$BEVARA log --verify | grep -q 'verified 2 entries'
 expect_fail $BEVARA publish -y      # same version again -> 409
 expect_fail $BEVARA publish -y --no-sign
 
@@ -128,7 +138,8 @@ cat > legacy.json <<'JSON'
     ],
     "sources":"https://github.com/Bevara/legacy",
     "Format": ["Legacy"],
-    "licence_required":false
+    "licence_required":false,
+    "using": ["solver_1"]
 }
 JSON
 mkdir -p build && cp "$FIXTURE" build/legacy_1.wasm
@@ -160,7 +171,7 @@ $BEVARA install dummy >/dev/null
 node -e "
 const fs=require('fs');
 const a=fs.readFileSync('legacy.json.orig','utf8').split('\\n'), b=fs.readFileSync('legacy.json','utf8').split('\\n');
-for (const l of a) if (!b.includes(l) && !/\\}\\s*$/.test(l) && !/licence_required/.test(l)) { console.error('line changed or lost: '+l); process.exit(1); }
+for (const l of a) if (!b.includes(l) && !/\\}\\s*$/.test(l) && !/licence_required|"using"/.test(l)) { console.error('line changed or lost: '+l); process.exit(1); }
 if (!b.some(l=>l.includes('\"filters\":[\"legacydec\"]'))) { console.error('compact array was reformatted'); process.exit(1); }
 console.log('  legacy.json kept its layout; added:', b.filter(l=>!a.includes(l)).map(s=>s.trim()).join(' '));"
 check test ! -f bevara.json
@@ -266,10 +277,11 @@ $BEVARA log --verify
 $BEVARA audit --audit-level high
 
 step "a rewritten log is detected by the pinned checkpoint"
+# Entry #2 is bevara:dummy@1.0.0, which this site installed (#1 is the runtime).
 kill "$REG_PID"; sleep 0.3
 node -e "
 const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('$WORK/data/registry.sqlite');
-db.prepare(\"UPDATE log SET record = replace(record,'1.0.0','1.0.0-forged') WHERE seq = 1\").run();db.close();"
+db.prepare(\"UPDATE log SET record = replace(record,'1.0.0','1.0.0-forged') WHERE seq = 2\").run();db.close();"
 PORT=$PORT DATA_DIR="$WORK/data" node "$ROOT/packages/registry/src/server.js" >>"$WORK/registry.log" 2>&1 &
 REG_PID=$!
 for i in $(seq 1 50); do curl -fs "$BEVARA_REGISTRY/-/ping" >/dev/null 2>&1 && break; sleep 0.1; done

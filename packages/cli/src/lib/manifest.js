@@ -20,6 +20,7 @@ export const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-
 // package name; declared separately because package names are lowercase while
 // an accessor file may not be (libOpenVVC_1.wasm).
 export const MODULE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+export const KINDS = ['filter', 'runtime'];
 export const SUPPORT_VALUES = ['image', 'audio', 'video', 'canvas', 'text', 'subtitle', 'container', 'other'];
 export const STREAM_TYPES = ['visual', 'audio', 'text', 'file', 'scene', 'od', 'metadata', 'font', 'unknown'];
 
@@ -46,7 +47,15 @@ export function validateManifest(m, { forPublish = false } = {}) {
 
   if (!isStr(m.description) || !m.description.trim()) warnings.push('"description" is empty');
 
-  if (!isStrArray(m.filters) || m.filters.length === 0) errors.push('"filters" must list the GPAC filter names registered by the module (e.g. ["theoradec"])');
+  // A runtime is a solver (a main module and its JavaScript), not a filter:
+  // what it registers itself is "builtins", read from its loader.js.
+  if (m.kind !== undefined && !KINDS.includes(m.kind)) errors.push(`"kind" must be one of ${KINDS.map((k) => JSON.stringify(k)).join(', ')} (got ${JSON.stringify(m.kind)})`);
+  const runtime = m.kind === 'runtime';
+  if (runtime) {
+    if (m.filters !== undefined && !(Array.isArray(m.filters) && m.filters.length === 0)) errors.push('a runtime registers no "filters": list what it registers itself in "builtins" (read from loader.js at publish)');
+    if (m.using !== undefined) errors.push('a runtime is what accessors link against: it has no "using"');
+    if (m.builtins !== undefined && !isStrArray(m.builtins)) errors.push('"builtins" must list GPAC filter names');
+  } else if (!isStrArray(m.filters) || m.filters.length === 0) errors.push('"filters" must list the GPAC filter names registered by the module (e.g. ["theoradec"])');
 
   if (m.support !== undefined) {
     if (!isStrArray(m.support)) errors.push('"support" must be an array of strings');
@@ -59,7 +68,7 @@ export function validateManifest(m, { forPublish = false } = {}) {
   if (m.using !== undefined) {
     if (!isStrArray(m.using) || !m.using.length || !m.using.every((u) => /^[A-Za-z0-9][A-Za-z0-9._-]*_\d+$/.test(u)))
       errors.push('"using" must list the solvers the module links against, as pages name them (["solver_1"], ["solver_minimal_1", "solver_1"])');
-  } else if (forPublish) warnings.push('"using" is not set: the module is taken to link against any solver (list the ones it works with, e.g. ["solver_1"])');
+  } else if (forPublish && !runtime) errors.push('"using" must list the runtimes (solvers) the filter links against, as pages name them: ["solver_minimal_1"], ["solver_1"] - each must be published on the registry');
   if (m.license !== undefined && !isStr(m.license)) errors.push('"license" must be a string (SPDX identifier)');
   if (m.license === undefined && forPublish) warnings.push('no licence: add a LICENCE file (an "SPDX-License-Identifier:" line makes it exact)');
   if (m.licence_required !== undefined && typeof m.licence_required !== 'boolean') errors.push('"licence_required" must be a boolean');
@@ -137,7 +146,7 @@ export function normalizeManifest(m) {
 }
 
 // Fields that are meaningful once published (everything a consumer needs).
-export const PUBLIC_FIELDS = ['name', 'version', 'abi', 'module', 'description', 'filters', 'support', 'formats', 'extension', 'using', 'keywords', 'license', 'licence_required', 'georestrictions', 'priority', 'caps', 'projects', 'language', 'inputs', 'outputs', 'sources', 'homepage', 'filter_source', 'dependencies', 'help', 'author'];
+export const PUBLIC_FIELDS = ['name', 'version', 'abi', 'kind', 'builtins', 'module', 'description', 'filters', 'support', 'formats', 'extension', 'using', 'keywords', 'license', 'licence_required', 'georestrictions', 'priority', 'caps', 'projects', 'language', 'inputs', 'outputs', 'sources', 'homepage', 'filter_source', 'dependencies', 'help', 'author'];
 
 export function publicManifest(m) {
   const out = {};

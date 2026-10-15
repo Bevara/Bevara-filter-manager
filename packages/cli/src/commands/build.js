@@ -21,7 +21,7 @@ export async function run({ args, opts }) {
   if (args.length > 1) throw new CliError('build takes one directory at most');
   const project = Project.load({ dir: args[0] });
   const buildDir = opts['build-dir'];
-  if (!project.isFilter) throw new CliError(`${project.manifestName} does not describe a filter (no "filters")`);
+  if (!project.isFilter) throw new CliError(`${project.manifestName} does not describe a filter (no "filters") nor a runtime ("kind": "runtime")`);
   const m = filterManifest(project, { buildDir });
   await buildFilter(project, { script: opts.script, buildDir });
   const { info } = checkArtifact(project, m);

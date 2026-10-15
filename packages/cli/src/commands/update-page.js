@@ -9,6 +9,7 @@ import { resolveTree, installResolved } from '../lib/resolve.js';
 import { needsOf, videoTailNeeds, resolvePipeline, pageSolver, describeNeed } from '../lib/capabilities.js';
 import { mediaTracks, closeMediaInfo } from '../lib/mediainfo.js';
 import { extensionOf } from '../lib/formats.js';
+import { pageRequirements, locateSources, deployFiles } from '../lib/page-files.js';
 
 export const options = {
   write: { type: 'boolean', short: 'w' },
@@ -19,6 +20,9 @@ export const options = {
   'no-scripts': { type: 'boolean' },
   install: { type: 'boolean', short: 'i' },
   offline: { type: 'boolean' },
+  runtime: { type: 'string', multiple: true },
+  'no-files': { type: 'boolean' },
+  refresh: { type: 'boolean' },
 };
 
 export const help = `Rewrites a page so its media elements go through the universal tags: each
@@ -34,15 +38,28 @@ different \`with\` lists. Nothing is written unless --write is passed; by defaul
 the changes are shown as a diff. Everything the command does not touch is kept
 byte for byte, including quoting and indentation.
 
+With --write, the files the page then loads are put where it looks for them:
+the universal-*.js scripts under --scripts, and the solver (using="…") and the
+accessors (with="…") next to the page, as the player resolves them. Accessors
+and solvers (runtime packages) come from the registry, checked against their
+integrity hashes; --runtime <dir> is looked in first, and is where the tag
+scripts come from. A file already there is kept when it differs (a module
+built by hand), unless --refresh.
+
   bevara update-page index.html
   bevara update-page site/**/*.html --write
-  bevara update-page index.html --write --install     also install the accessors it uses
+  bevara update-page index.html --write --runtime ../player/build   scripts and solvers from a local build
+  bevara update-page index.html --write --install     also record the accessors in bevara.json
   bevara update-page index.html --attrs "progressive use-worker"
 
 Options:
   -w, --write        apply the changes (default: show the diff only)
   -f, --force        rewrite elements that already carry an "is" attribute
-  -i, --install      install the accessors the page ends up requiring
+  -i, --install      also install the accessors into the site project (bevara.json, lockfile)
+  --runtime <dir>    take the universal-*.js scripts and the solvers from this directory
+                     (repeatable; looked in before the registry)
+  --no-files         rewrite the HTML only, copy nothing
+  --refresh          replace files next to the page that differ from their source
   --non-native       only convert formats no browser engine decodes natively
   --attrs "a b"      extra attributes to set, e.g. "progressive use-worker use-cache"
   --scripts <base>   where the universal-*.js scripts live (default: scripts/)
@@ -183,23 +200,31 @@ export async function run({ args, opts }) {
         const text = missingScripts.map((n) => `${indent}<script src="${scriptsBase}${n}"></script>\n`).join('');
         edits.push({ start: insertAt.offset, end: insertAt.offset, text });
         report.scripts = missingScripts.map((n) => scriptsBase + n);
-        for (const n of missingScripts) {
-          const local = path.resolve(dir, scriptsBase + n);
-          if (!fs.existsSync(local)) report.warnings.push(`${scriptsBase}${n} is not next to the page; copy the universal tag scripts there or pass --scripts`);
-        }
       }
     }
 
     report.changed = edits.length > 0;
     report.updated = report.changed ? applyEdits(html, edits) : html;
+    report.dir = dir;
     report.preview = report.changed ? previewEdits(html, edits) : [];
     reports.push(report);
 
     if (report.changed && opts.write) await fs.promises.writeFile(file, report.updated);
   }
 
+  // What the pages load once rewritten, put where they look for it.
+  if (!opts['no-files']) {
+    const runtimeDirs = (opts.runtime ?? []).map((d) => path.resolve(d));
+    for (const d of runtimeDirs) if (!fs.existsSync(d)) throw new CliError(`--runtime ${d}: no such directory`);
+    for (const r of reports) {
+      const reqs = pageRequirements(r.updated, r.dir);
+      if (!reqs.length) continue;
+      r.files = await deployFiles(locateSources(reqs, { index, runtimeDirs }), { client, refresh: opts.refresh, dryRun: !opts.write });
+    }
+  }
+
   if (opts.json) {
-    console.log(JSON.stringify(reports.map(({ updated, preview, ...r }) => r), null, 2));
+    console.log(JSON.stringify(reports.map(({ updated, preview, dir, ...r }) => r), null, 2));
     return;
   }
 
@@ -207,9 +232,11 @@ export async function run({ args, opts }) {
   for (const r of reports) print(r, opts, registry);
 
   const touched = reports.filter((r) => r.changed);
-  if (!touched.length) log.info('nothing to change');
-  else if (opts.write) log.ok(`updated ${touched.length} file${touched.length === 1 ? '' : 's'}`);
-  else log.info(color.dim(`run again with ${color.bold('--write')} to apply`));
+  const copied = reports.flatMap((r) => (r.files ?? []).filter((f) => f.status === 'added' || f.status === 'replaced'));
+  const parts = [touched.length && `${touched.length} page${touched.length === 1 ? '' : 's'}`, copied.length && `${copied.length} file${copied.length === 1 ? '' : 's'} next to ${touched.length || reports.length === 1 ? 'it' : 'them'}`].filter(Boolean);
+  if (!parts.length) log.info('nothing to change');
+  else if (opts.write) log.ok(`updated ${parts.join(', ')}`);
+  else log.info(color.dim(`${parts.join(' and ')} to update: run again with ${color.bold('--write')} to apply`));
 
   if (opts.install) {
     if (!index) throw new CliError('--install needs the registry', { hint: 'drop --offline, or check `bevara ping`' });
@@ -226,6 +253,25 @@ export async function run({ args, opts }) {
     const installed = await installResolved(client, project, chosen, { registry });
     log.ok(`${chosen.size} filters in ${path.relative(process.cwd(), project.accessorsDir) || '.'}/ (${installed.length} downloaded)`);
   }
+}
+
+const FILE_MARK = { added: '+', replaced: '↻', present: '=', kept: '!', missing: '✖', failed: '✖' };
+
+function printFiles(r, opts) {
+  if (!r.files?.length) return;
+  const would = !opts.write;
+  const present = r.files.filter((f) => f.status === 'present');
+  for (const f of r.files) {
+    if (f.status === 'present') continue;
+    const mark = FILE_MARK[f.status];
+    const where = color.dim(`← ${f.source?.label ?? ''}`);
+    if (f.status === 'added' || f.status === 'replaced') console.log(`  ${color.green(mark)} ${f.ref}  ${where}${would ? color.dim(` (with --write)`) : ''}`);
+    else if (f.status === 'kept') log.warn(`  ${f.ref} differs from ${f.source.label}; kept (--refresh replaces it)`);
+    else log.warn(`  ${f.ref}: ${f.status === 'missing' ? f.missing : f.error}`);
+  }
+  if (present.length) console.log(color.dim(`  = ${present.length} file${present.length > 1 ? 's' : ''} already up to date next to the page`));
+  const missing = r.files.filter((f) => f.status === 'missing' && f.kind !== 'accessor');
+  if (missing.some((f) => f.kind === 'solver')) log.info('  solvers are runtime packages: publish one with bevara publish --build in its directory, or pass --runtime <dir> with a player build');
 }
 
 /* Scripts go just before </body>, or </html>, or at the end of the document. */
@@ -248,6 +294,7 @@ function print(r, opts, registry) {
   }
   if (r.scripts.length) console.log(`  ${color.green('+')} ${r.scripts.map((s) => `<script src="${s}">`).join(', ')}`);
   for (const w of r.warnings) log.warn('  ' + w);
+  printFiles(r, opts);
 
   if (r.changed && !opts.write) {
     console.log();

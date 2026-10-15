@@ -26,7 +26,7 @@ const shortName = (n) => (typeof n === 'string' && n.includes(':') ? n.slice(n.i
 
 /* A filter manifest is a <name>.json whose "name" is <name> (a namespace
  * prefix is allowed: "bevara:libjxl" in libjxl.json) and which lists the GPAC
- * filters it registers. That rule matches every existing filter repository
+ * filters it registers - or, for a solver, says "kind": "runtime". That rule matches every existing filter repository
  * and nothing else they contain (filter_list.json, recommended.json…). */
 export function filterManifestsIn(dir) {
   let entries;
@@ -37,9 +37,39 @@ export function filterManifestsIn(dir) {
     const file = path.join(dir, f);
     let data;
     try { data = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { continue; }
-    if (data && shortName(data.name) === f.slice(0, -5) && Array.isArray(data.filters)) found.push(file);
+    if (data && shortName(data.name) === f.slice(0, -5) && (Array.isArray(data.filters) || data.kind === 'runtime')) found.push(file);
   }
   return found.sort();
+}
+
+/* JSON files that look like a filter manifest ("filters" listed) but whose
+ * "name" is not the file name - the usual reason no manifest is found
+ * (ogg.json naming itself "oggdmx"). For the error message only. */
+export function nearMissManifests(dir) {
+  let entries;
+  try { entries = fs.readdirSync(dir); } catch { return []; }
+  const out = [];
+  for (const f of entries.sort()) {
+    if (!f.endsWith('.json') || NOT_MANIFESTS.has(f)) continue;
+    let data;
+    try { data = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch { continue; }
+    if (data && (Array.isArray(data.filters) || data.kind === 'runtime') && shortName(data.name) !== f.slice(0, -5)) out.push({ file: f, name: data.name });
+  }
+  return out;
+}
+
+/* No manifest in `dir`: say which file came close, and what to change. */
+function noManifestError(dir, generic) {
+  const near = nearMissManifests(dir);
+  if (near.length === 1) {
+    const { file, name } = near[0];
+    const base = file.slice(0, -5);
+    return new CliError(`${file} in ${dir} names the filter ${JSON.stringify(name)}, not "${base}"`, {
+      hint: `the manifest is the <name>.json whose "name" is <name>: set "name": "${base}" in ${file} (the accessor is built as ${base}_<N>.wasm by add_filter in CMakeLists.txt)`,
+    });
+  }
+  if (near.length > 1) return new CliError(`no manifest in ${dir}: ${near.map((n) => `${n.file} names ${JSON.stringify(n.name)}`).join(', ')}`, { hint: generic });
+  return new CliError(`no manifest in ${dir}`, { hint: generic });
 }
 
 /* The manifest of one directory, or null. Throws when several filter
@@ -198,11 +228,12 @@ export class Project {
       if (!st) throw new CliError(`${dir}: no such directory`);
       if (!st.isDirectory()) throw new CliError(`${dir} is not a directory`, { hint: 'pass the filter repository, e.g. `bevara publish ../libjxl`' });
       const m = manifestIn(root);
-      if (!m) throw new CliError(`no manifest in ${root}`, { hint: 'a filter repository has a <name>.json (e.g. libjxl.json) whose "name" is <name>' });
+      if (!m) throw noManifestError(root, 'a filter repository has a <name>.json (e.g. libjxl.json) whose "name" is <name>');
       return new Project(root, m.file, { shadowed: m.shadowed });
     }
     const found = findProjectRoot();
     if (!found) {
+      if (required && nearMissManifests(process.cwd()).length) throw noManifestError(process.cwd(), 'a filter repository has a <name>.json (e.g. libjxl.json) whose "name" is <name>');
       if (required) throw new CliError('no manifest found in this directory or its parents', {
         hint: 'a filter repository needs its <name>.json (e.g. libjxl.json), a site a bevara.json: `bevara init` creates one, `bevara install <filter>` starts a site',
       });
@@ -223,7 +254,8 @@ export class Project {
   get isFilterManifest() { return !!this.manifestFile && path.basename(this.manifestFile) !== MANIFEST; }
 
   get accessorsDir() { return path.resolve(this.root, this.manifest.accessorsDir ?? DEFAULT_ACCESSORS_DIR); }
-  get isFilter() { return Array.isArray(this.manifest.filters) && this.manifest.filters.length > 0; }
+  // A module this repository builds: a filter (accessor), or a runtime (solver).
+  get isFilter() { return (Array.isArray(this.manifest.filters) && this.manifest.filters.length > 0) || this.manifest.kind === 'runtime'; }
 
   /* Writes back into the file it came from. Only the entries that changed are
    * rewritten, so a hand-formatted <name>.json keeps its layout and a diff
