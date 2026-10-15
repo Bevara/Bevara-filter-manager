@@ -57,7 +57,13 @@ export function filterManifest(project, { buildDir: requested } = {}) {
   }
   // A runtime (a solver) is an add_executable(<name>_${VERSION}); a filter an add_filter().
   const runtime = m.kind === 'runtime';
-  const call = short ? (runtime ? executableFor(project.root, short) : addFilterFor(project.root, short)) : null;
+  // A tags package is JavaScript: no CMake; its generation is in its scripts' names.
+  const tagsPkg = m.kind === 'tags';
+  if (tagsPkg && m.abi === undefined && Array.isArray(m.tags) && m.tags.length) {
+    const g = /_(\d+)\.js$/.exec(m.tags[0]);
+    if (g) { m.abi = parseInt(g[1], 10); derived.generation = `the names of its scripts (${m.tags[0]})`; }
+  }
+  const call = short && !tagsPkg ? (runtime ? executableFor(project.root, short) : addFilterFor(project.root, short)) : null;
   const via = runtime ? 'add_executable' : 'add_filter';
   if (call?.name && short && call.name.toLowerCase() !== short.toLowerCase()) {
     derived.notes.push(`CMakeLists.txt builds ${call.name}_${call.rawGeneration ?? '?'}.wasm (${via}, line ${call.line}) but ${project.manifestName} names the ${runtime ? 'runtime' : 'filter'} "${short}"`);
@@ -118,7 +124,12 @@ export function filterManifest(project, { buildDir: requested } = {}) {
   m.language ??= 'wasm';
 
   const n = normalizeManifest(m);
-  if (!n.main && n.name) {
+  if (tagsPkg) {
+    // "main" is the directory the scripts are built into.
+    n.main = n.main ?? buildDir;
+    n.mainDefaulted = !m.main;
+    n.mainCandidates = [n.main, ...(requested ? [] : FALLBACK_BUILD_DIRS)];
+  } else if (!n.main && n.name) {
     n.main = path.join(buildDir, accessorFileName(n.name, n.abi, n.module));
     n.mainDefaulted = true;
     // With -B the user named the directory; otherwise hand-made builds count too.
@@ -173,7 +184,7 @@ export async function buildFilter(project, { script, buildDir, yes = false } = {
   // if it is that one, else offered for download (emsdk-provision.js).
   // A custom build command may bring its own toolchain: without an SDK it runs as is.
   let sdk;
-  try { sdk = await ensureEmsdk(project.root, { yes }); }
+  try { sdk = m.kind === 'tags' ? { env: process.env, version: null, source: 'none' } : await ensureEmsdk(project.root, { yes }); }
   catch (e) {
     if (!custom || !(e instanceof CliError)) throw e;
     log.warn(`no Emscripten SDK: running "${custom}" as it is`);
@@ -208,6 +219,7 @@ export async function buildFilter(project, { script, buildDir, yes = false } = {
 }
 
 export function checkArtifact(project, m) {
+  if (m.kind === 'tags') return checkTagScripts(project, m);
   const candidates = m.mainDefaulted ? m.mainCandidates : [m.main];
   const hit = candidates.find((c) => fs.existsSync(path.resolve(project.root, c)));
   if (!hit) {
@@ -233,13 +245,29 @@ export function checkArtifact(project, m) {
   return { file, buf, info, js };
 }
 
+/* The scripts of a tags package, all in one directory: "main", else the build
+ * directory and its fallbacks. */
+function checkTagScripts(project, m) {
+  const tags = m.tags ?? [];
+  const candidates = m.mainDefaulted ? m.mainCandidates : [m.main];
+  const dir = candidates.map((c) => path.resolve(project.root, c)).find((d) => tags.every((t) => fs.existsSync(path.join(d, t))));
+  if (!dir) {
+    throw new CliError(`tag scripts not found: ${tags.join(', ')}`, {
+      hint: `looked in ${candidates.join(', ')} of ${project.root}; build them (bevara publish --build runs "scripts.build"), or set "main" to the directory they are built into`,
+    });
+  }
+  m.main = path.relative(project.root, dir) || '.';
+  const scripts = tags.map((t) => ({ file: t, data: fs.readFileSync(path.join(dir, t)) }));
+  return { file: path.join(dir, tags[0]), buf: scripts[0].data, info: null, js: null, scripts };
+}
+
 // Creates <name>-<version>.tgz with the npm-style "package/" prefix:
 //   package/bevara.json, package/<name>_<abi>.wasm, docs and "files" entries.
 export async function packFilter(project, { outDir = project.root, dryRun = false, buildDir } = {}) {
   const m = checkFilterManifest(project, { buildDir });
-  const { buf, js, file } = checkArtifact(project, m);
+  const { buf, js, file, scripts: tagScripts } = checkArtifact(project, m);
   // The SDK it was built with, from the build directory it was found in.
-  if (m.emsdk === undefined) {
+  if (m.emsdk === undefined && m.kind !== 'tags') {
     const built = emsdkOfBuild(path.dirname(file));
     if (built) {
       m.emsdk = built.version;
@@ -259,7 +287,8 @@ export async function packFilter(project, { outDir = project.root, dryRun = fals
   const { main, mainDefaulted, mainCandidates, derived, scripts, accessorsDir, registry, Format, runtime, project: _project, ...published } = m;
   for (const n of derived.notes.slice(derived.notesShown ?? 0)) log.warn(n);
   add('bevara.json', Buffer.from(JSON.stringify(published, null, 2) + '\n'));
-  add(accessorFileName(m.name, m.abi, m.module), buf);
+  if (tagScripts) for (const t of tagScripts) add(t.file, t.data);
+  else add(accessorFileName(m.name, m.abi, m.module), buf);
   if (js) add(accessorFileName(m.name, m.abi, m.module).replace(/\.wasm$/, '.js'), js);
   const extra = new Set([...ALWAYS_INCLUDE, ...(m.files ?? [])]);
   for (const rel of extra) {
@@ -276,7 +305,7 @@ export async function packFilter(project, { outDir = project.root, dryRun = fals
     await tar.create({ gzip: true, cwd: stageRoot, file: tgzPath, portable: true, mtime: new Date('2000-01-01T00:00:00Z') }, ['package']);
   }
   fs.rmSync(stageRoot, { recursive: true, force: true });
-  return { manifest: m, tgzPath, tgzName, entries, size: dryRun ? null : fs.statSync(tgzPath).size, wasmBuffer: buf, jsBuffer: js };
+  return { manifest: m, tgzPath, tgzName, entries, size: dryRun ? null : fs.statSync(tgzPath).size, wasmBuffer: buf, jsBuffer: js, scripts: tagScripts };
 }
 
 function* walk(dir) {

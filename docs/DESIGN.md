@@ -340,6 +340,24 @@ an accessor.
   (`universal-*_N.js`) are not runtimes and are not published (update-page takes
   them from `--runtime`).
 
+**D7.3b — Tag scripts are packages of kind "tags".**
+The universal-*_N.js scripts define the customised elements; pages load them
+with `<script src>`. A tags package carries several of them: the first stands
+as the main file of the version (the `versions` table wants one), the others
+are recorded with it (`wasm_info.files`), the signed record covers each
+(`tagsSha256`), and every script name is reserved in `accessor_names` - so
+`/accessors/universal-img_1.js` finds its package by that reservation, the
+package name being `universal-tags`. The index lists them under `tags`.
+- *Why*: update-page must write a page that works, and the scripts are part of
+  what it loads; publishing them like the rest gives the same signatures,
+  owners and versions, and lets anyone publish other tags, extending the
+  universal ones or not (`"extends"`).
+- *Rejected*: shipping the scripts inside the CLI's npm package - simpler and
+  offline, but every change to the tags would need a CLI release.
+- *Consequences*: webpack keeps the licence comments of the bundled code inside
+  each script (`extractComments: false`): a script copied alone next to a page
+  would otherwise lose the .LICENSE.txt holding them.
+
 **D7.4 — A solver directory builds on its own.**
 `player/solver` and `player/solver_minimal` were subdirectories of the player's
 CMake project only. A guarded block (`if(CMAKE_SOURCE_DIR STREQUAL

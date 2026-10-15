@@ -39,6 +39,16 @@ mkdir -p .bevara/.build && cp "$FIXTURE" .bevara/.build/solver_1.wasm && printf 
 $BEVARA publish -y | grep 'runtime with built-in filters fin, fout' >/dev/null
 curl -fs -o /dev/null -w '%{http_code} %{content_type}\n' "$BEVARA_REGISTRY/accessors/solver_1.js" | grep -q '200 text/javascript'
 
+step "publish the tag scripts (kind \"tags\"), then list them with bevara tags"
+mkdir -p "$WORK/player/build/dist" && cd "$WORK/player"
+printf '{ "name": "universal-tags", "kind": "tags", "description": "Universal elements", "tags": ["universal-img_1.js", "universal-video_1.js"], "main": "build/dist" }\n' > universal-tags.json
+printf 'SPDX-License-Identifier: ISC\n' > LICENCE
+printf '/*! notice */ customElements.define("universal-img_1")\n' > build/dist/universal-img_1.js
+printf '/*! notice */ customElements.define("universal-video_1")\n' > build/dist/universal-video_1.js
+$BEVARA publish -y | grep 'bevara:universal-tags@1.0.0' >/dev/null
+$BEVARA tags --remote | grep -q 'universal-img_1, universal-video_1'
+curl -fs "$BEVARA_REGISTRY/accessors/universal-img_1.js" | grep -q 'universal-img_1'
+
 step "init a filter (non-interactive) and fake the build with the fixture"
 mkdir -p "$WORK/dummy" && cd "$WORK/dummy"
 $BEVARA init -y -n dummy
@@ -51,11 +61,11 @@ mkdir -p build && cp "$FIXTURE" build/dummy_1.wasm
 
 step "pack --dry-run, publish (signs with an auto-generated key, appended to the log)"
 $BEVARA pack --dry-run
-$BEVARA publish -y | grep 'log #2' >/dev/null       # #1 is the runtime
+$BEVARA publish -y | grep 'log #3' >/dev/null       # #1 is the runtime, #2 the tag scripts
 $BEVARA key ls | grep -q active
 $BEVARA key show | grep -q '^sha256:'
 $BEVARA log | grep -q 'bevara:dummy@1.0.0'
-$BEVARA log --verify | grep -q 'verified 2 entries'
+$BEVARA log --verify | grep -q 'verified 3 entries'
 expect_fail $BEVARA publish -y      # same version again -> 409
 expect_fail $BEVARA publish -y --no-sign
 
@@ -278,11 +288,11 @@ $BEVARA log --verify
 $BEVARA audit --audit-level high
 
 step "a rewritten log is detected by the pinned checkpoint"
-# Entry #2 is bevara:dummy@1.0.0, which this site installed (#1 is the runtime).
+# Entry #3 is bevara:dummy@1.0.0, which this site installed (#1 the runtime, #2 the tags).
 kill "$REG_PID"; sleep 0.3
 node -e "
 const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('$WORK/data/registry.sqlite');
-db.prepare(\"UPDATE log SET record = replace(record,'1.0.0','1.0.0-forged') WHERE seq = 2\").run();db.close();"
+db.prepare(\"UPDATE log SET record = replace(record,'1.0.0','1.0.0-forged') WHERE seq = 3\").run();db.close();"
 PORT=$PORT DATA_DIR="$WORK/data" node "$ROOT/packages/registry/src/server.js" >>"$WORK/registry.log" 2>&1 &
 REG_PID=$!
 for i in $(seq 1 50); do curl -fs "$BEVARA_REGISTRY/-/ping" >/dev/null 2>&1 && break; sleep 0.1; done

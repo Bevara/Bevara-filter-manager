@@ -10,10 +10,9 @@
  * that it is one and otherwise drops it - so a page pointing there needs
  * nothing copied.
  *
- * Accessors and solvers (runtime packages) come from the registry index,
- * verified against their integrity hashes; local directories (--runtime) are
- * looked in first for scripts and solvers. The tag scripts are not published
- * on the registry: they come from --runtime or are already there.
+ * Accessors, solvers (runtime packages) and tag scripts (tags packages) come
+ * from the registry index, verified against their integrity hashes; local
+ * directories (--runtime) are looked in first for scripts and solvers.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -81,7 +80,10 @@ export function locateSources(reqs, { index, runtimeDirs = [] }) {
       }
       return { ...r, missing: index ? `no runtime ${r.name.replace(/\.(js|wasm)$/, '')} on this registry${runtimeDirs.length ? `, nor in ${runtimeDirs.join(', ')}` : ''}` : 'the registry is unreachable' };
     }
-    return { ...r, missing: runtimeDirs.length ? `not in ${runtimeDirs.join(', ')}` : 'the tag scripts are not on the registry: pass --runtime <dir> (a player build, e.g. Showcase/scripts)' };
+    // A tag script: from a tags package of the registry (bevara:universal-tags).
+    const tag = index?.tags?.find((t) => t.file === r.name);
+    if (tag) return { ...r, source: { url: tag.url, integrity: tag.integrity, label: `${tag.name}@${tag.version}` } };
+    return { ...r, missing: index ? `no tags package on this registry provides ${r.name}${runtimeDirs.length ? `, nor ${runtimeDirs.join(', ')}` : ''} (bevara tags lists them)` : 'the registry is unreachable' };
   });
 }
 

@@ -111,6 +111,15 @@ export async function installResolved(client, project, chosen, { registry, quiet
       if (got !== doc.dist.integrity) throw new CliError(`integrity check failed for ${name}@${version}: expected ${doc.dist.integrity}, got ${got}`);
       signature = checkSignature(name, version, doc, digest.toString('hex'));
       if (!signature && !quiet) log.warn(`${name}@${version} is not signed by its publisher`);
+      // A tags package brings its other scripts, each in the signed record.
+      for (const f of doc.dist.files ?? []) {
+        if (f.file === doc.dist.file) continue;
+        const data = await client.download(f.url);
+        const d = createHash('sha256').update(data).digest();
+        if ('sha256-' + d.toString('base64') !== f.integrity) throw new CliError(`integrity check failed for ${name}@${version} (${f.file})`);
+        if (doc.signature && doc.signature.record.tagsSha256?.[f.file] !== d.toString('hex')) throw new CliError(`${name}@${version}: signed record does not describe ${f.file}`);
+        fs.writeFileSync(path.join(project.accessorsDir, f.file), data);
+      }
       // A runtime brings its JavaScript, covered by the same signed record.
       let jsBuf = null;
       if (doc.dist.js) {
@@ -133,7 +142,7 @@ export async function installResolved(client, project, chosen, { registry, quiet
       version, abi: doc.abi, file: doc.dist.file, integrity: doc.dist.integrity, resolved: doc.dist.wasm,
       ...(doc.dist.jsFile ? { jsFile: doc.dist.jsFile, jsIntegrity: doc.dist.jsIntegrity } : {}),
       license: doc.license, dependencies: doc.dependencies ?? {}, signature,
-      ...(doc.kind === 'runtime' ? { kind: 'runtime' } : { using: doc.using ?? [] }),
+      ...(doc.kind === 'runtime' ? { kind: 'runtime' } : doc.kind === 'tags' ? { kind: 'tags', files: (doc.dist.files ?? []).map((f) => ({ file: f.file, integrity: f.integrity })) } : { using: doc.using ?? [] }),
       ...(doc.emsdk ? { emsdk: doc.emsdk } : {}),
     };
     if (packument?.deprecated && !quiet) log.warn(`${name} is deprecated: ${packument.deprecated}`);

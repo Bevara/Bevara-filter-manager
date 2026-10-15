@@ -41,11 +41,11 @@ byte for byte, including quoting and indentation.
 
 With --write, the files the page then loads are put where it looks for them:
 the universal-*.js scripts under --scripts, and the solver (using="…") and the
-accessors (with="…") next to the page, as the player resolves them. Accessors
-and solvers (runtime packages) come from the registry, checked against their
-integrity hashes; --runtime <dir> is looked in first, and is where the tag
-scripts come from. A file already there is kept when it differs (a module
-built by hand), unless --refresh.
+accessors (with="…") next to the page, as the player resolves them. Accessors,
+solvers (runtime packages) and tag scripts (tags packages, bevara tags) come
+from the registry, checked against their integrity hashes; --runtime <dir> is
+looked in first. A file already there is kept when it differs (a module built
+by hand), unless --refresh.
 
   bevara update-page index.html
   bevara update-page site/**/*.html --write
@@ -290,6 +290,7 @@ function printFiles(r, opts) {
   if (present.length) console.log(color.dim(`  = ${present.length} file${present.length > 1 ? 's' : ''} already up to date next to the page`));
   const missing = r.files.filter((f) => f.status === 'missing' && f.kind !== 'accessor');
   if (missing.some((f) => f.kind === 'solver')) log.info('  solvers are runtime packages: publish one with bevara publish --build in its directory, or pass --runtime <dir> with a player build');
+  if (missing.some((f) => f.kind === 'script')) log.info('  tag scripts are tags packages: publish them with bevara publish --build in the player, or pass --runtime <dir> with a player build');
 }
 
 /* Scripts go just before </body>, or </html>, or at the end of the document. */

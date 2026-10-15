@@ -34,7 +34,7 @@ spec:
         fsGroup: 1000              # "node" user in the image
       containers:
         - name: registry
-          image: 192.168.1.120:32000/bevara-registry:1.4.2
+          image: 192.168.1.120:32000/bevara-registry:1.4.3
           imagePullPolicy: Always
           ports:
             - name: http

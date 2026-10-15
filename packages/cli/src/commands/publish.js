@@ -48,7 +48,7 @@ export async function run({ args, opts }) {
   }
   // At least one runtime "using" names must be published: the registry refuses
   // the upload otherwise, so say it before building. The others only warn.
-  const using = project.manifest.kind === 'runtime' ? [] : project.manifest.using ?? [];
+  const using = ['runtime', 'tags'].includes(project.manifest.kind) ? [] : project.manifest.using ?? [];
   if (using.length) {
     let runtimes = null;
     try { runtimes = (await client.get('/accessors/index.json', { auth: false })).runtimes ?? null; } catch { /* checked by the registry at upload */ }
@@ -67,13 +67,13 @@ export async function run({ args, opts }) {
   const m = r.manifest;
   console.log(`${color.bold(m.name)}@${color.green(m.version)} → ${color.dim(registry)}  ${color.dim(`(${path.relative(process.cwd(), project.manifestFile) || project.manifestName})`)}`);
   if (m.derived?.version) console.log(color.dim(`  version ${m.version} = generation ${m.abi}, from ${m.derived.generation ?? 'the default'}`));
-  console.log(color.dim(`  module ${m.main}`));
+  console.log(color.dim(m.kind === 'tags' ? `  scripts ${m.tags.join(', ')} from ${m.main}` : `  module ${m.main}`));
   if (m.derived?.license) console.log(color.dim(`  licence ${m.license}, from ${m.derived.license}`));
   if (m.derived?.caps) console.log(color.dim(`  capabilities of ${m.caps.map((c) => `${c.filter} (priority ${c.priority})`).join(', ')}, from ${m.derived.caps}`));
   if (m.derived?.projects) console.log(color.dim(`  projects ${m.projects.join(', ')}, from ${m.derived.projects}`));
   if (m.derived?.builtins) console.log(color.dim(`  runtime with built-in filters ${m.builtins.join(', ')}, from ${m.derived.builtins}`));
   if (m.emsdk) console.log(color.dim(`  built with emsdk ${m.emsdk}, from ${m.derived?.emsdk ?? '"emsdk" in the manifest'}`));
-  else log.warn('the Emscripten version of this build is unknown (no CMake configuration next to the module): it is published without "emsdk"');
+  else if (m.kind !== 'tags') log.warn('the Emscripten version of this build is unknown (no CMake configuration next to the module): it is published without "emsdk"');
   console.log(table(r.entries.map((e) => [color.dim(e.path), formatBytes(e.size)]), { indent: '  ' }));
   console.log(`  ${color.dim('tarball')} ${formatBytes(r.size)}`);
   try {
@@ -88,12 +88,13 @@ export async function run({ args, opts }) {
       // Registering is idempotent: it also repairs a key the registry no longer
       // knows (a reset database, another registry behind the same URL).
       const key = await ensureKey(client, registry);
-      const wasmFile = accessorFileName(m.name, m.abi, m.module);
+      const wasmFile = m.kind === 'tags' ? m.tags[0] : accessorFileName(m.name, m.abi, m.module);
       const record = {
         type: 'publish', name: fullName, version: m.version, abi: m.abi, file: wasmFile,
         wasmSha256: createHash('sha256').update(r.wasmBuffer).digest('hex'),
         tarballSha256: createHash('sha256').update(tarball).digest('hex'),
         ...(r.jsBuffer ? { jsSha256: createHash('sha256').update(r.jsBuffer).digest('hex') } : {}),
+        ...(r.scripts ? { tagsSha256: Object.fromEntries(r.scripts.map((x) => [x.file, createHash('sha256').update(x.data).digest('hex')])) } : {}),
         keyId: key.keyId, timestamp: new Date().toISOString(),
       };
       headers['x-bevara-record'] = Buffer.from(canonicalize(record)).toString('base64');

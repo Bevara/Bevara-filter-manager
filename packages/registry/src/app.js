@@ -12,7 +12,7 @@ import { Ledger } from './ledger.js';
 import { extractTarball } from './tarball.js';
 import { inspectWasm, accessorFileName } from './wasm.js';
 import { validateManifest, normalizeManifest, publicManifest, NAME_RE, PART_RE, fullName, splitName, shortName } from './manifest.js';
-import { verifyRecord, keyIdOf } from './sig.js';
+import { verifyRecord, keyIdOf, canonicalize } from './sig.js';
 import { Router, HttpError, json, html, redirect, readBody, readJson, readForm, sendFile, bearer } from './http.js';
 import { catalogPage, loginFormPage, tokenPage } from './ui.js';
 
@@ -49,7 +49,7 @@ export function createApp(config = {}) {
   const router = new Router();
 
   // "theora_1.wasm" -> "theora": the name a page uses, without its generation, any case.
-  const accessorKey = (wasmFile) => wasmFile.replace(/_\d+\.wasm$/, '').toLowerCase();
+  const accessorKey = (file) => file.replace(/_\d+\.(wasm|js)$/, '').toLowerCase();
 
   /* Namespaces that must exist whatever happened before: the default one, so
    * that administrators can grant it (bevara namespace add <user> bevara), and
@@ -131,6 +131,14 @@ export function createApp(config = {}) {
   // A runtime (kind "runtime": a solver) ships its JavaScript next to its
   // .wasm; both are recorded in wasm_info.js: { file, sha256, size }.
   const jsOf = (row) => (row.wasm_info ? JSON.parse(row.wasm_info).js ?? null : null);
+  // Every file a version serves: its main file (the .wasm; a tags package's
+  // first script), a runtime's .js, a tags package's other scripts.
+  const filesOf = (row) => {
+    const info = row.wasm_info ? JSON.parse(row.wasm_info) : {};
+    const all = [{ file: row.wasm_file, sha256: row.wasm_sha256, size: row.wasm_size }, ...(info.js ? [info.js] : []), ...(info.files ?? [])];
+    return all.filter((f, i) => all.findIndex((g) => g.file === f.file) === i);
+  };
+  const typeOf = (file) => (file.endsWith('.js') ? JS_TYPE : 'application/wasm');
 
   function versionDoc(req, row) {
     const m = JSON.parse(row.manifest);
@@ -152,6 +160,7 @@ export function createApp(config = {}) {
         tarballIntegrity: 'sha256-' + b64(row.tarball_sha256),
         tarballSize: row.tarball_size,
         ...(js ? { jsFile: js.file, js: `${base}/accessors/${encodeURIComponent(row.name)}/${row.version}/${js.file}`, jsIntegrity: 'sha256-' + b64(js.sha256), jsSha256: js.sha256, jsSize: js.size } : {}),
+        ...(m.kind === 'tags' ? { files: filesOf(row).map((f) => ({ file: f.file, url: `${base}/accessors/${encodeURIComponent(row.name)}/${row.version}/${f.file}`, integrity: 'sha256-' + b64(f.sha256), sha256: f.sha256, size: f.size })) } : {}),
       },
       signature: sig ?? null,   // { record, signature, keyId, publicKey, logSeq, logHash }
       wasm: row.wasm_info ? (({ signature, ...rest }) => rest)(JSON.parse(row.wasm_info)) : undefined,
@@ -330,7 +339,7 @@ export function createApp(config = {}) {
       const m = r.manifest ? JSON.parse(r.manifest) : {};
       return {
         name: r.name, namespace: splitName(r.name).namespace, latest: r.latest, description: r.description, deprecated: r.deprecated,
-        kind: m.kind ?? 'filter', using: m.using, builtins: m.builtins, emsdk: m.emsdk, abi: r.abi, file: r.wasm_file, size: r.wasm_size, brSize: r.wasm_br_size,
+        kind: m.kind ?? 'filter', using: m.using, builtins: m.builtins, tags: m.tags, extends: m.extends, emsdk: m.emsdk, abi: r.abi, file: r.wasm_file, size: r.wasm_size, brSize: r.wasm_br_size,
         filters: m.filters ?? [], support: m.support ?? [], formats: m.formats ?? [], keywords: m.keywords ?? [],
         license: m.license, licence_required: !!m.licence_required, priority: m.priority,
         downloads: q.downloads.get(r.name).n, updated: r.updated_at,
@@ -378,17 +387,24 @@ export function createApp(config = {}) {
   const wasmHeaders = { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' };
   router.get('/accessors/:name/:version/:file', async (req, res, { params }) => {
     const row = q.version.get(validName(params.name), params.version);
-    const js = row && jsOf(row);
-    const isJs = !!js && js.file === params.file;
-    if (!row || (row.wasm_file !== params.file && !isJs)) throw new HttpError(404, 'accessor not found');
+    const f = row && filesOf(row).find((x) => x.file === params.file);
+    if (!f) throw new HttpError(404, 'accessor not found');
     q.bumpDownloads.run(row.name, row.version);
-    await sendFile(req, res, store.path(row.name, row.version, params.file), isJs ? JS_TYPE : 'application/wasm', { ...wasmHeaders, 'cache-control': 'public, max-age=31536000, immutable', 'x-bevara-version': row.version });
+    await sendFile(req, res, store.path(row.name, row.version, f.file), typeOf(f.file), { ...wasmHeaders, 'cache-control': 'public, max-age=31536000, immutable', 'x-bevara-version': row.version });
   });
 
   // The latest version of every filter that is not deprecated, as players and
   // the selector see it.
   const latestRows = () => db.prepare('SELECT v.* FROM filters f JOIN versions v ON v.name = f.name AND v.version = f.latest WHERE f.deprecated IS NULL ORDER BY f.name').all();
-  const isRuntime = (r) => JSON.parse(r.manifest).kind === 'runtime';
+  const kindOf = (r) => JSON.parse(r.manifest).kind ?? 'filter';
+  const isRuntime = (r) => kindOf(r) === 'runtime';
+  // The tag scripts pages load with <script src>, one entry per file.
+  const tagEntries = (req) => {
+    const base = baseUrl(req);
+    return latestRows().filter((r) => kindOf(r) === 'tags').flatMap((r) => filesOf(r).map((f) => ({
+      name: r.name, version: r.version, file: f.file, url: `${base}/accessors/${encodeURIComponent(r.name)}/${r.version}/${f.file}`, integrity: 'sha256-' + b64(f.sha256), size: f.size,
+    })));
+  };
   // The solvers pages name in using="…": what update-page copies next to a page.
   const runtimeEntries = (req) => {
     const base = baseUrl(req);
@@ -402,12 +418,12 @@ export function createApp(config = {}) {
   };
   const indexEntries = (req) => {
     const base = baseUrl(req);
-    return latestRows().filter((r) => !isRuntime(r))
+    return latestRows().filter((r) => kindOf(r) === 'filter')
       .map((r) => { const m = JSON.parse(r.manifest); const info = r.wasm_info ? JSON.parse(r.wasm_info) : {}; return { name: r.name, version: r.version, abi: r.abi, file: r.wasm_file, url: `${base}/accessors/${encodeURIComponent(r.name)}/${r.version}/${r.wasm_file}`, filters: m.filters, support: m.support, formats: m.formats, extension: m.extension, using: m.using, inputs: m.inputs, outputs: m.outputs, priority: m.priority, caps: m.caps, projects: m.projects, language: m.language ?? 'wasm', emsdk: m.emsdk, license: m.license, licence_required: !!m.licence_required, georestrictions: m.georestrictions, dependencies: m.dependencies, size: r.wasm_size, brSize: r.wasm_br_size, integrity: 'sha256-' + b64(r.wasm_sha256), keyId: info.signature?.keyId, logSeq: info.signature?.logSeq }; });
   };
 
   router.get('/accessors/index.json', (req, res) => {
-    json(res, 200, { registry: baseUrl(req), generated: new Date().toISOString(), checkpoint: ledger.checkpoint(), filters: indexEntries(req), runtimes: runtimeEntries(req) }, wasmHeaders);
+    json(res, 200, { registry: baseUrl(req), generated: new Date().toISOString(), checkpoint: ledger.checkpoint(), filters: indexEntries(req), runtimes: runtimeEntries(req), tags: tagEntries(req) }, wasmHeaders);
   });
 
   // Capability-driven selection (paper, Section 5): every accessor whose
@@ -446,24 +462,26 @@ export function createApp(config = {}) {
 
   // Same shape as filters/filter_list.json in the Bevara filters repository.
   router.get('/accessors/filter_list.json', (req, res) => {
-    const names = latestRows().filter((r) => !isRuntime(r)).map((r) => shortName(r.name));
+    const names = latestRows().filter((r) => kindOf(r) === 'filter').map((r) => shortName(r.name));
     json(res, 200, { tag: TAG_BLOCK, using: ['core'], with: [...new Set(names)] }, wasmHeaders);
   });
 
   router.get('/accessors/:file', async (req, res, { params }) => {
     const m = /^((?:[a-z0-9][a-z0-9._-]*:)?[A-Za-z0-9][A-Za-z0-9._-]*)_(\d+)\.(wasm|js)$/.exec(params.file);
-    if (!m) throw new HttpError(404, 'accessor not found (expected [namespace:]<module>_<abi>.wasm, or .js for a runtime)');
+    if (!m) throw new HttpError(404, 'accessor not found (expected [namespace:]<module>_<abi>.wasm, or .js for a runtime or a tag script)');
     // The file name carries the module name, which equals the package name up
-    // to case (libOpenVVC_1.wasm -> bevara:libopenvvc). A namespace prefix may
-    // precede it in the URL but never appears in the stored file name.
-    const row = latestFor(validName(m[1].toLowerCase()), { abi: parseInt(m[2], 10) });
-    if (!row) throw new HttpError(404, `no published version of "${m[1]}" with abi ${m[2]}`);
+    // to case (libOpenVVC_1.wasm -> bevara:libopenvvc) - except for the scripts
+    // of a tags package (universal-img_1.js in bevara:universal-tags), found
+    // through the names the package reserved. A namespace prefix may precede it
+    // in the URL but never appears in the stored file name.
     const wanted = `${shortName(m[1])}_${m[2]}.${m[3]}`;
-    // The .js of a runtime (solver_minimal_1.js) is served like its .wasm.
-    const file = m[3] === 'js' ? jsOf(row)?.file : row.wasm_file;
-    if (file !== wanted) throw new HttpError(404, m[3] === 'js' && !jsOf(row) ? `${row.name} is an accessor: it has no .js` : `this accessor is published as ${row.wasm_file}`);
+    const reserved = !m[1].includes(':') && db.prepare('SELECT name FROM accessor_names WHERE key = ?').get(accessorKey(wanted))?.name;
+    const row = latestFor(reserved || validName(m[1].toLowerCase()), { abi: parseInt(m[2], 10) });
+    if (!row) throw new HttpError(404, `no published version of "${m[1]}" with abi ${m[2]}`);
+    const f = filesOf(row).find((x) => x.file === wanted);
+    if (!f) throw new HttpError(404, m[3] === 'js' ? `${row.name} has no ${wanted}` : `this accessor is published as ${row.wasm_file}`);
     q.bumpDownloads.run(row.name, row.version);
-    await sendFile(req, res, store.path(row.name, row.version, file), m[3] === 'js' ? JS_TYPE : 'application/wasm', { ...wasmHeaders, 'cache-control': 'public, max-age=300', 'x-bevara-version': row.version, 'x-bevara-name': row.name });
+    await sendFile(req, res, store.path(row.name, row.version, f.file), typeOf(f.file), { ...wasmHeaders, 'cache-control': 'public, max-age=300', 'x-bevara-version': row.version, 'x-bevara-name': row.name });
   });
 
   // ------------------------------------------------------------- publish
@@ -485,13 +503,19 @@ export function createApp(config = {}) {
     if (errors.length) throw new HttpError(400, 'invalid manifest', { errors, warnings });
     if (manifest.name !== name || manifest.version !== version) throw new HttpError(400, `manifest is ${manifest.name}@${manifest.version} but URL is ${name}@${version}`);
 
-    const wasmName = accessorFileName(name, manifest.abi, manifest.module);
+    // A tags package carries scripts only: its first one stands as the main file.
+    const tagsPkg = manifest.kind === 'tags';
+    const tagFiles = tagsPkg ? manifest.tags.map((t) => ({ file: t, data: files.get(`package/${t}`) })) : [];
+    for (const t of tagFiles) if (!t.data) throw new HttpError(400, `tarball must contain package/${t.file}`);
+    if (tagsPkg && manifest.abi !== parseInt(/_(\d+)\.js$/.exec(manifest.tags[0])[1], 10)) throw new HttpError(400, `"abi" (${manifest.abi}) is not the generation of the scripts (${manifest.tags[0]})`);
+    const wasmName = tagsPkg ? manifest.tags[0] : accessorFileName(name, manifest.abi, manifest.module);
     const wasm = files.get(`package/${wasmName}`);
     if (!wasm) throw new HttpError(400, `tarball must contain package/${wasmName}`);
-    const info = inspectWasm(wasm);
-    if (!info.valid) throw new HttpError(400, `${wasmName}: ${info.error}`);
-    if (!info.sideModule) throw new HttpError(400, `${wasmName} is not an Emscripten side module (no dylink section). Link with -sSIDE_MODULE=2`);
+    const info = tagsPkg ? { exports: [], imports: [], dylink: null, customSections: [] } : inspectWasm(wasm);
+    if (!tagsPkg && !info.valid) throw new HttpError(400, `${wasmName}: ${info.error}`);
+    if (!tagsPkg && !info.sideModule) throw new HttpError(400, `${wasmName} is not an Emscripten side module (no dylink section). Link with -sSIDE_MODULE=2`);
     const wasmSha = sha256(wasm).toString('hex');
+    const tagShas = Object.fromEntries(tagFiles.map((t) => [t.file, sha256(t.data).toString('hex')]));
     const tarSha = sha256(tarball).toString('hex');
 
     // A runtime (a solver) is a main module plus the JavaScript that loads it.
@@ -505,7 +529,7 @@ export function createApp(config = {}) {
      * from the same place as the accessors, so at least one of them must be a
      * runtime published here. A registry may carry several runtimes (one per
      * environment); those it lacks are only reported. */
-    if (!runtime) {
+    if (!runtime && !tagsPkg) {
       const published = [], lacking = [];
       for (const u of manifest.using ?? []) {
         const holder = db.prepare('SELECT name FROM accessor_names WHERE key = ?').get(u.replace(/_\d+$/, '').toLowerCase())?.name;
@@ -556,8 +580,10 @@ export function createApp(config = {}) {
       if (!key) throw new HttpError(400, `unknown signing key ${record.keyId}; run \`bevara key register\``);
       if (key.user_id !== user.id) throw new HttpError(403, 'signing key belongs to another user');
       if (key.revoked_at) throw new HttpError(403, 'signing key was revoked');
-      const expected = { type: 'publish', name, version, abi: manifest.abi, file: wasmName, wasmSha256: wasmSha, tarballSha256: tarSha, ...(js ? { jsSha256: jsSha } : {}) };
-      for (const [k, v] of Object.entries(expected)) if (record[k] !== v) throw new HttpError(400, `signed record does not match the upload (${k}: ${JSON.stringify(record[k])} vs ${JSON.stringify(v)})`);
+      const expected = { type: 'publish', name, version, abi: manifest.abi, file: wasmName, wasmSha256: wasmSha, tarballSha256: tarSha, ...(js ? { jsSha256: jsSha } : {}), ...(tagsPkg ? { tagsSha256: tagShas } : {}) };
+      for (const [k, v] of Object.entries(expected)) {
+        if (canonicalize(record[k] ?? null) !== canonicalize(v)) throw new HttpError(400, `signed record does not match the upload (${k}: ${JSON.stringify(record[k])} vs ${JSON.stringify(v)})`);
+      }
       if (!verifyRecord(record, String(signature), key.public_key)) throw new HttpError(400, 'invalid signature');
       sigInfo = { record, signature: String(signature), keyId: key.key_id, publicKey: key.public_key };
     } else if (cfg.requireSignatures) {
@@ -565,12 +591,15 @@ export function createApp(config = {}) {
     }
 
     // Accessor names are unique across the registry (see accessor_names).
-    const key = accessorKey(wasmName);
-    const holder = db.prepare('SELECT name FROM accessor_names WHERE key = ?').get(key)?.name;
-    if (holder && holder !== name) {
-      throw new HttpError(409, `the accessor name "${key}" is already taken by ${holder}: pages load accessors by file name (${wasmName}), so two packages cannot provide it`, {
-        hint: `pick another name (or "module") for this accessor, or ask the owners of ${holder} to add you: bevara owner add <you> ${holder}`,
-      });
+    const keys = tagsPkg ? [...new Set(tagFiles.map((t) => accessorKey(t.file)))] : [accessorKey(wasmName)];
+    const key = keys[0];
+    for (const k of keys) {
+      const holder = db.prepare('SELECT name FROM accessor_names WHERE key = ?').get(k)?.name;
+      if (holder && holder !== name) {
+        throw new HttpError(409, `the accessor name "${k}" is already taken by ${holder}: pages load files by name (${tagsPkg ? `${k}_N.js` : wasmName}), so two packages cannot provide it`, {
+          hint: `pick another name (or "module") for this accessor, or ask the owners of ${holder} to add you: bevara owner add <you> ${holder}`,
+        });
+      }
     }
     // Two packages registering the same GPAC filter would clash if a page linked both.
     const mine = new Set(manifest.filters);
@@ -579,13 +608,18 @@ export function createApp(config = {}) {
       if (shared.length) warnings.push(`GPAC filter${shared.length > 1 ? 's' : ''} ${shared.join(', ')} also registered by ${other.name}: a page linking both would register ${shared.length > 1 ? 'them' : 'it'} twice`);
     }
 
+    // A tag that builds on another one needs that one on the registry.
+    for (const [script, base] of Object.entries(tagsPkg ? manifest.extends ?? {} : {})) {
+      const holder = db.prepare('SELECT name FROM accessor_names WHERE key = ?').get(base.replace(/_\d+$/, '').toLowerCase())?.name;
+      if (!holder || holder === name) { if (!manifest.tags.includes(`${base}.js`)) warnings.push(`${script} extends ${base}, which is not published on this registry`); }
+    }
     for (const [dep, range] of Object.entries(manifest.dependencies)) {
       if (!semver.validRange(range)) throw new HttpError(400, `dependency "${dep}": invalid range "${range}"`);
       if (dep !== name && !q.filter.get(fullName(dep, cfg.defaultNamespace))) warnings.push(`dependency "${dep}" is not published on this registry`);
     }
 
     const tarballName = `${shortName(name)}-${version}.tgz`;
-    const { brSize } = await store.save(name, version, { tarball, tarballName, wasm, wasmName, js, jsName });
+    const { brSize } = await store.save(name, version, { tarball, tarballName, wasm, wasmName, js, jsName, extra: tagFiles.filter((t) => t.file !== wasmName).map((t) => ({ name: t.file, data: t.data })) });
     db.exec('BEGIN');
     try {
       if (!nsRow) {
@@ -598,15 +632,16 @@ export function createApp(config = {}) {
       }
       // Re-checked here, synchronously inside the transaction: two concurrent
       // publishes of the same accessor name cannot both get past this point.
-      db.prepare('INSERT OR IGNORE INTO accessor_names (key, name) VALUES (?, ?)').run(key, name);
-      const claimed = db.prepare('SELECT name FROM accessor_names WHERE key = ?').get(key).name;
+      for (const k of keys) db.prepare('INSERT OR IGNORE INTO accessor_names (key, name) VALUES (?, ?)').run(k, name);
+      const claimed = keys.map((k) => db.prepare('SELECT name FROM accessor_names WHERE key = ?').get(k).name).find((n) => n !== name) ?? name;
       if (claimed !== name) throw new HttpError(409, `the accessor name "${key}" was just taken by ${claimed}`);
       if (sigInfo) {
         const { seq, hash } = ledger.append(sigInfo.record, sigInfo.signature, sigInfo.keyId);
         sigInfo.logSeq = seq; sigInfo.logHash = hash;
       }
       const wasmInfo = { exports: info.exports.map((e) => e.name), imports: info.imports.length, needed: info.dylink?.needed ?? [], customSections: info.customSections, signature: sigInfo,
-        ...(js ? { js: { file: jsName, sha256: jsSha, size: js.length } } : {}) };
+        ...(js ? { js: { file: jsName, sha256: jsSha, size: js.length } } : {}),
+        ...(tagsPkg ? { files: tagFiles.map((t) => ({ file: t.file, sha256: tagShas[t.file], size: t.data.length })) } : {}) };
       db.prepare(`INSERT INTO versions (name, version, abi, manifest, wasm_file, wasm_sha256, wasm_size, wasm_br_size, tarball_sha256, tarball_size, wasm_info, published_by)
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(name, version, manifest.abi, JSON.stringify(publicManifest(manifest)), wasmName, wasmSha, wasm.length, brSize, tarSha, tarball.length, JSON.stringify(wasmInfo), user.name);

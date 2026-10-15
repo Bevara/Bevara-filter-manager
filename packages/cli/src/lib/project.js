@@ -37,7 +37,7 @@ export function filterManifestsIn(dir) {
     const file = path.join(dir, f);
     let data;
     try { data = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { continue; }
-    if (data && shortName(data.name) === f.slice(0, -5) && (Array.isArray(data.filters) || data.kind === 'runtime')) found.push(file);
+    if (data && shortName(data.name) === f.slice(0, -5) && (Array.isArray(data.filters) || data.kind === 'runtime' || data.kind === 'tags')) found.push(file);
   }
   return found.sort();
 }
@@ -53,7 +53,7 @@ export function nearMissManifests(dir) {
     if (!f.endsWith('.json') || NOT_MANIFESTS.has(f)) continue;
     let data;
     try { data = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch { continue; }
-    if (data && (Array.isArray(data.filters) || data.kind === 'runtime') && shortName(data.name) !== f.slice(0, -5)) out.push({ file: f, name: data.name });
+    if (data && (Array.isArray(data.filters) || data.kind === 'runtime' || data.kind === 'tags') && shortName(data.name) !== f.slice(0, -5)) out.push({ file: f, name: data.name });
   }
   return out;
 }
@@ -255,7 +255,7 @@ export class Project {
 
   get accessorsDir() { return path.resolve(this.root, this.manifest.accessorsDir ?? DEFAULT_ACCESSORS_DIR); }
   // A module this repository builds: a filter (accessor), or a runtime (solver).
-  get isFilter() { return (Array.isArray(this.manifest.filters) && this.manifest.filters.length > 0) || this.manifest.kind === 'runtime'; }
+  get isFilter() { return (Array.isArray(this.manifest.filters) && this.manifest.filters.length > 0) || ['runtime', 'tags'].includes(this.manifest.kind); }
 
   /* Writes back into the file it came from. Only the entries that changed are
    * rewritten, so a hand-formatted <name>.json keeps its layout and a diff

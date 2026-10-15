@@ -6,6 +6,7 @@ import { clientFor, Project } from '../lib/ctx.js';
 export const options = { remote: { type: 'boolean', short: 'a' }, support: { type: 'string' }, format: { type: 'string' }, long: { type: 'boolean', short: 'l' } };
 export const help = `bevara filters    the filters (accessors)
 bevara runtimes   the runtimes (solvers) filters link against
+bevara tags       the tag scripts (universal elements) pages load
 
 In a site project, what is installed; outside one (or with --remote), what the
 registry publishes. For filters, the "Runtimes" column is the filter's "using",
@@ -27,6 +28,12 @@ export async function run({ args = [], opts }) {
   return listWhat(opts, 'filters');
 }
 
+// bevara tags
+export async function tags({ args = [], opts }) {
+  if (args.length) throw new CliError('bevara tags takes no argument');
+  return listWhat(opts, 'tags');
+}
+
 // bevara runtimes
 export async function runtimes({ args = [], opts }) {
   if (args.length) throw new CliError('bevara runtimes takes no argument');
@@ -41,11 +48,13 @@ async function listWhat(opts, what) {
 }
 
 function listInstalled(project, opts, what) {
-  const wanted = (e) => (what === 'runtimes') === (e.kind === 'runtime');
+  const KIND = { filters: 'filter', runtimes: 'runtime', tags: 'tags' };
+  const wanted = (e) => (e.kind ?? 'filter') === KIND[what];
   const entries = Object.entries(project.lock.filters).filter(([, e]) => wanted(e));
   if (opts.json) return console.log(JSON.stringify(Object.fromEntries(entries), null, 2));
   const rel = path.relative(process.cwd(), project.accessorsDir) || '.';
-  if (!entries.length) return log.info(`no ${what === 'runtimes' ? 'runtime' : 'filter'} installed in ${rel}/ ${color.dim(`(bevara install <${what === 'runtimes' ? 'runtime' : 'filter'}>)`)}`);
+  const one = { filters: 'filter', runtimes: 'runtime', tags: 'tags package' }[what];
+  if (!entries.length) return log.info(`no ${one} installed in ${rel}/ ${color.dim(`(bevara install <${one}>)`)}`);
   const direct = new Set(Object.keys(project.manifest.dependencies ?? {}));
   // "using" of each installed filter: from the lock, or (installed by an older
   // CLI) from the manifest copy next to the module.
@@ -61,12 +70,13 @@ function listInstalled(project, opts, what) {
     const using = usingOf(name, e);
     const row = [direct.has(name) ? color.bold(name) : color.dim(name), e.version, present ? color.dim(e.file) : color.red(`${e.file} missing`)];
     if (what === 'filters') row.push(using.join(', ') || color.yellow('no "using"'));
-    else row.push(e.jsFile && fs.existsSync(path.join(project.accessorsDir, e.jsFile)) ? color.dim(e.jsFile) : color.red(`${e.jsFile ?? 'its .js'} missing`));
-    row.push(e.emsdk ? `emsdk ${e.emsdk}` : color.dim('emsdk ?'));
+    else if (what === 'runtimes') row.push(e.jsFile && fs.existsSync(path.join(project.accessorsDir, e.jsFile)) ? color.dim(e.jsFile) : color.red(`${e.jsFile ?? 'its .js'} missing`));
+    else row.push((e.files ?? []).map((f) => (fs.existsSync(path.join(project.accessorsDir, f.file)) ? color.dim(f.file) : color.red(`${f.file} missing`))).join(', '));
+    if (what !== 'tags') row.push(e.emsdk ? `emsdk ${e.emsdk}` : color.dim('emsdk ?'));
     if (opts.long) row.push(present ? formatBytes(fs.statSync(file).size) : '', e.license ?? '', Object.keys(e.dependencies ?? {}).join(', '));
     return row;
   }), { indent: '  ' }));
-  if (what === 'runtimes') return;
+  if (what !== 'filters') return;
   const accessors = entries;
   console.log(color.dim(`\n  with="${accessors.map(([, e]) => e.file.replace(/\.wasm$/, '')).join(';')}"`));
   // The page loads one solver: one that every installed filter links against.
@@ -82,10 +92,12 @@ async function listRemote(project, opts, what) {
   if (opts.support) params.support = opts.support;
   if (opts.format) params.format = opts.format;
   const { filters: all, total } = await client.search(params);
-  if (opts.json) return console.log(JSON.stringify(all.filter((f) => (what === 'runtimes') === (f.kind === 'runtime')), null, 2));
+  const KIND = { filters: 'filter', runtimes: 'runtime', tags: 'tags' };
+  if (opts.json) return console.log(JSON.stringify(all.filter((f) => (f.kind ?? 'filter') === KIND[what]), null, 2));
   if (!total) return log.info(`nothing published on ${registry} yet`);
   const runtimes = all.filter((f) => f.kind === 'runtime');
-  const filters = all.filter((f) => f.kind !== 'runtime');
+  const filters = all.filter((f) => (f.kind ?? 'filter') === 'filter');
+  const tagPkgs = all.filter((f) => f.kind === 'tags');
   // A registry older than runtime packages lists no "kind" nor "using".
   const known = all.some((f) => f.kind);
   const published = new Set(runtimes.map((r) => `${r.name.split(':').pop()}_${r.abi ?? 1}`));
@@ -103,6 +115,19 @@ async function listRemote(project, opts, what) {
     return f.using.map((u) => (published.has(u) ? u : color.red(u))).join(', ');
   };
 
+  if (what === 'tags') {
+    if (!known || !tagPkgs.length) return log.info(`no tags package published on ${registry} yet ${color.dim('(bevara publish --build in the player, which holds universal-tags.json)')}`);
+    console.log(`${tagPkgs.length} tags package${tagPkgs.length === 1 ? '' : 's'} on ${color.dim(registry)}\n`);
+    const theader = ['Package', 'Version', 'Scripts', 'Extends', 'Description'];
+    if (opts.long) theader.push('License', 'Downloads');
+    console.log(table(tagPkgs.map((t) => {
+      const ext = Object.entries(t.extends ?? {}).map(([s, b]) => `${s.replace(/\.js$/, '')} ← ${b}`).join(', ');
+      const row = [t.deprecated ? color.yellow(t.name) : color.bold(t.name), t.latest ?? '', (t.tags ?? []).map((x) => x.replace(/\.js$/, '')).join(', '), ext || color.dim('-'), (t.description ?? '').slice(0, 50)];
+      if (opts.long) row.push(t.license ?? '', String(t.downloads));
+      return row;
+    }), { header: theader.map(color.bold) }));
+    return;
+  }
   if (what === 'runtimes') {
     if (!known) return log.info(`${registry} predates runtime packages: it lists none`);
     if (!runtimes.length) return log.info(`no runtime published on ${registry} yet ${color.dim('(bevara publish --build in a solver directory)')}`);

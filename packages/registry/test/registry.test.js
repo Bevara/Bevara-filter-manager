@@ -592,3 +592,48 @@ describe('runtimes (solvers) as packages', () => {
     assert.equal(clash.status, 403);
   });
 });
+
+describe('tag scripts (kind "tags")', () => {
+  let reg, root, bob;
+  const scripts = { 'universal-img_1.js': 'customElements.define("universal-img_1")', 'universal-audio_1.js': 'customElements.define("universal-audio_1")' };
+  const tagsManifest = (over = {}) => ({ name: 'universal-tags', version: '1.0.0', abi: 1, kind: 'tags', description: 'Universal tags', license: 'MIT', tags: Object.keys(scripts), ...over });
+  const sha = (b) => createHash('sha256').update(b).digest('hex');
+  const publishTags = (token, m = tagsManifest(), { tamper = false } = {}) => publish(reg.api, token, m, {
+    wasm: null, extra: Object.fromEntries(Object.entries(scripts).map(([f, t]) => [f, Buffer.from(t)])),
+    record: { file: m.tags[0], wasmSha256: sha(Buffer.from(scripts[m.tags[0]])), tagsSha256: Object.fromEntries(m.tags.map((t) => [t, tamper ? 'f'.repeat(64) : sha(Buffer.from(scripts[t]))])) },
+  });
+  before(async () => {
+    reg = await startRegistry();
+    root = await signup(reg.api, 'root');
+    bob = await signup(reg.api, 'bob');
+    void root;
+  });
+  after(() => reg.close());
+
+  test('any account publishes them; the signed record must cover every script', async () => {
+    assert.equal((await publishTags(bob, tagsManifest(), { tamper: true })).status, 400);
+    const r = await publishTags(bob);
+    assert.equal(r.status, 201, JSON.stringify(r.data));
+  });
+
+  test('pages load each script from /accessors/, and the index lists them apart', async () => {
+    const img = await reg.api('GET', '/accessors/universal-img_1.js');
+    assert.equal(img.status, 200);
+    assert.match(img.headers.get('content-type'), /javascript/);
+    assert.equal(img.data, scripts['universal-img_1.js']);
+    assert.equal((await reg.api('GET', '/accessors/universal-audio_1.js')).data, scripts['universal-audio_1.js']);
+    const { data } = await reg.api('GET', '/accessors/index.json');
+    assert.deepEqual(data.tags.map((t) => t.file).sort(), Object.keys(scripts).sort());
+    assert.ok(!data.filters.some((f) => f.name === 'bevara:universal-tags'));
+    const doc = await reg.api('GET', '/filters/universal-tags/1.0.0');
+    assert.deepEqual(doc.data.dist.files.map((f) => f.file), Object.keys(scripts));
+  });
+
+  test('the names of its scripts are reserved: no accessor can take them', async () => {
+    const clash = await publish(reg.api, root, manifest({ name: 'universal-img', filters: ['x'] }));
+    assert.equal(clash.status, 409);
+    assert.match(clash.data.error, /universal-img/);
+    const bad = await publish(reg.api, bob, tagsManifest({ version: '1.0.1', tags: ['universal-img_1.js', 'universal-video_2.js'] }), { wasm: null });
+    assert.equal(bad.status, 400);
+  });
+});

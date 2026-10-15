@@ -116,6 +116,16 @@ Publishing a filter requires `"using"`, and at least one runtime it names
 published here: otherwise `400` (`none of the runtimes in "using" … is
 published`); the ones missing are returned as `warnings`.
 
+## Tag scripts (kind "tags")
+A tags package lists its scripts in `"tags"` (`["universal-img_1.js", …]`, one
+generation); its tarball holds `package/<script>` for each, and its signed
+record adds `tagsSha256: {script: sha256}`. Each script is served at
+`/accessors/<script>` (found through the names the package reserved) and at
+`/accessors/<name>/<version>/<script>`; the version document lists them in
+`dist.files`; `/accessors/index.json` lists them under `tags` (`name`,
+`version`, `file`, `url`, `integrity`, `size`). `"extends"` maps a script to
+the tag it builds on.
+
 ## Selection (no auth, CORS `*`)
 Capability-driven selection (paper, Section 5; DESIGN.md D13): every accessor
 whose declared inputs accept the query's, under side conditions.

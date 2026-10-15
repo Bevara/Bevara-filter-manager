@@ -183,6 +183,7 @@ directly (newest non-deprecated version, brotli, CORS).
 | `bevara audit [--fix]` | integrity vs lockfile & registry, module validity, advisories, deprecations, outdated, licence flags; exit 1 on findings (`--audit-level`) |
 | `bevara filters [--remote]` | installed filters, or the registry catalog (alias `list`) |
 | `bevara runtimes [--remote]` | installed runtimes (solvers), or those the registry publishes |
+| `bevara tags [--remote]` | installed tag scripts, or the tags packages the registry publishes |
 | `bevara probe <file\|url>` | identify a media file (container, streams, codecs) and the accessors it needs |
 | `bevara update-page <file.html>` | rewrite a page so its media elements use the universal tags |
 | `bevara search <q>` / `bevara info <f>` | catalog queries |

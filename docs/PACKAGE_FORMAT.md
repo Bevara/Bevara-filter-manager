@@ -138,6 +138,21 @@ The generation comes from `add_executable(<name>_${VERSION})` and
 GPAC filters it registers itself) from `loader.js`. The package carries
 `<name>_<N>.wasm` and `<name>_<N>.js`. A runtime has no `"using"`.
 
+### Tags packages
+
+The scripts that define the universal elements are published as a package of
+kind `"tags"`, from the player:
+
+```jsonc
+{ "name": "universal-tags", "kind": "tags", "description": "…",
+  "tags": ["universal-img_1.js", "universal-audio_1.js", "universal-video_1.js", "universal-canvas_1.js", "universal-tags_1.js"],
+  "main": "build/dist",                 // the directory the scripts are built into
+  "scripts": { "build": "npm run build" },
+  "extends": { "my-img_1.js": "universal-img_1" } }   // optional: a tag built on another one
+```
+
+The generation is the `_N` of the scripts' names. No `"using"`, no emsdk.
+
 `emsdk` (the Emscripten version, e.g. `"6.0.8"`) is derived at publish from
 the CMake configuration of the build directory; it is never written in
 `<name>.json`.

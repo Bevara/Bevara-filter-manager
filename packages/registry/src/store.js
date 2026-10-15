@@ -3,6 +3,7 @@
 //   <name>/<version>/<name>_<abi>.wasm      the accessor, served to players
 //   <name>/<version>/<name>_<abi>.wasm.br   brotli-compressed copy
 //   <name>/<version>/<name>_<abi>.js        a runtime's JavaScript (+ .br)
+//   <name>/<version>/<tag>_<abi>.js         a tags package's scripts (+ .br)
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { brotliCompressSync, constants as zc } from 'node:zlib';
@@ -12,7 +13,7 @@ export class Store {
 
   dir(name, version) { return path.join(this.root, name, version); }
 
-  async save(name, version, { tarball, tarballName, wasm, wasmName, js, jsName }) {
+  async save(name, version, { tarball, tarballName, wasm, wasmName, js, jsName, extra = [] }) {
     const d = this.dir(name, version);
     await fs.mkdir(d, { recursive: true });
     await fs.writeFile(path.join(d, tarballName), tarball);
@@ -23,6 +24,11 @@ export class Store {
     if (js) {
       await fs.writeFile(path.join(d, jsName), js);
       await fs.writeFile(path.join(d, jsName + '.br'), brotli(js));
+    }
+    // The other scripts of a tags package.
+    for (const f of extra) {
+      await fs.writeFile(path.join(d, path.basename(f.name)), f.data);
+      await fs.writeFile(path.join(d, path.basename(f.name) + '.br'), brotli(f.data));
     }
     return { brSize: br.length };
   }

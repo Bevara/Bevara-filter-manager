@@ -20,7 +20,9 @@ export const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-
 // package name; declared separately because package names are lowercase while
 // an accessor file may not be (libOpenVVC_1.wasm).
 export const MODULE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-export const KINDS = ['filter', 'runtime'];
+export const KINDS = ['filter', 'runtime', 'tags'];
+// A tag script: the definition of a universal element, <name>_<generation>.js.
+export const TAG_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9.-]*(?:_[A-Za-z0-9.-]+)*_\d+\.js$/;
 export const SUPPORT_VALUES = ['image', 'audio', 'video', 'canvas', 'text', 'subtitle', 'container', 'other'];
 export const STREAM_TYPES = ['visual', 'audio', 'text', 'file', 'scene', 'od', 'metadata', 'font', 'unknown'];
 
@@ -51,7 +53,23 @@ export function validateManifest(m, { forPublish = false } = {}) {
   // what it registers itself is "builtins", read from its loader.js.
   if (m.kind !== undefined && !KINDS.includes(m.kind)) errors.push(`"kind" must be one of ${KINDS.map((k) => JSON.stringify(k)).join(', ')} (got ${JSON.stringify(m.kind)})`);
   const runtime = m.kind === 'runtime';
-  if (runtime) {
+  const tags = m.kind === 'tags';
+  if (tags) {
+    // The universal tags: the scripts that define the customised built-in
+    // elements (universal-img_1.js…), which pages load with <script src>.
+    if (m.filters !== undefined && !(Array.isArray(m.filters) && m.filters.length === 0)) errors.push('a tags package registers no "filters": it lists its scripts in "tags"');
+    if (m.using !== undefined) errors.push('a tags package has no "using": the element names its solver in the page');
+    if (!isStrArray(m.tags) || !m.tags.length || !m.tags.every((t) => TAG_FILE_RE.test(t))) errors.push('"tags" must list the scripts the package provides, as pages load them: ["universal-img_1.js", "universal-video_1.js"]');
+    else if (new Set(m.tags.map((t) => /_(\d+)\.js$/.exec(t)[1])).size > 1) errors.push('the scripts in "tags" must all be of one generation (the _N of their names)');
+    // A tag may build on another one (a customised universal-img_1): which, per script.
+    if (m.extends !== undefined) {
+      if (!m.extends || typeof m.extends !== 'object' || Array.isArray(m.extends)) errors.push('"extends" must map scripts of "tags" to the tag each one builds on: {"my-img_1.js": "universal-img_1"}');
+      else for (const [script, base] of Object.entries(m.extends)) {
+        if (Array.isArray(m.tags) && !m.tags.includes(script)) errors.push(`"extends" names ${script}, which is not in "tags"`);
+        if (!isStr(base) || !/^[A-Za-z0-9][A-Za-z0-9._-]*_\d+$/.test(base)) errors.push(`"extends.${script}" must name a tag as pages do, e.g. "universal-img_1"`);
+      }
+    }
+  } else if (runtime) {
     if (m.filters !== undefined && !(Array.isArray(m.filters) && m.filters.length === 0)) errors.push('a runtime registers no "filters": list what it registers itself in "builtins" (read from loader.js at publish)');
     if (m.using !== undefined) errors.push('a runtime is what accessors link against: it has no "using"');
     if (m.builtins !== undefined && !isStrArray(m.builtins)) errors.push('"builtins" must list GPAC filter names');
@@ -68,7 +86,7 @@ export function validateManifest(m, { forPublish = false } = {}) {
   if (m.using !== undefined) {
     if (!isStrArray(m.using) || !m.using.length || !m.using.every((u) => /^[A-Za-z0-9][A-Za-z0-9._-]*_\d+$/.test(u)))
       errors.push('"using" must list the solvers the module links against, as pages name them (["solver_1"], ["solver_minimal_1", "solver_1"])');
-  } else if (forPublish && !runtime) errors.push('"using" must list the runtimes (solvers) the filter links against, as pages name them: ["solver_minimal_1"], ["solver_1"] - each must be published on the registry');
+  } else if (forPublish && !runtime && !tags) errors.push('"using" must list the runtimes (solvers) the filter links against, as pages name them: ["solver_minimal_1"], ["solver_1"] - each must be published on the registry');
   if (m.license !== undefined && !isStr(m.license)) errors.push('"license" must be a string (SPDX identifier)');
   if (m.license === undefined && forPublish) warnings.push('no licence: add a LICENCE file (an "SPDX-License-Identifier:" line makes it exact)');
   if (m.licence_required !== undefined && typeof m.licence_required !== 'boolean') errors.push('"licence_required" must be a boolean');
@@ -147,7 +165,7 @@ export function normalizeManifest(m) {
 }
 
 // Fields that are meaningful once published (everything a consumer needs).
-export const PUBLIC_FIELDS = ['name', 'version', 'abi', 'kind', 'builtins', 'emsdk', 'module', 'description', 'filters', 'support', 'formats', 'extension', 'using', 'keywords', 'license', 'licence_required', 'georestrictions', 'priority', 'caps', 'projects', 'language', 'inputs', 'outputs', 'sources', 'homepage', 'filter_source', 'dependencies', 'help', 'author'];
+export const PUBLIC_FIELDS = ['name', 'version', 'abi', 'kind', 'builtins', 'tags', 'extends', 'emsdk', 'module', 'description', 'filters', 'support', 'formats', 'extension', 'using', 'keywords', 'license', 'licence_required', 'georestrictions', 'priority', 'caps', 'projects', 'language', 'inputs', 'outputs', 'sources', 'homepage', 'filter_source', 'dependencies', 'help', 'author'];
 
 export function publicManifest(m) {
   const out = {};

@@ -40,6 +40,7 @@ these requirements, and the alternatives rejected, are in
 | [R25](#r25) | Every change to the registry comes with a new version, which is the image tag ArgoCD deploys | 2026-10-16 |
 | [R26](#r26) | `revert-page` brings a page back to its state before `update-page`, removing the files it added | 2026-10-16 |
 | [R27](#r27) | A build without the right emsdk offers to download it and sets up its environment; declining shows how to use one's own | 2026-10-16 |
+| [R28](#r28) | Tag scripts are packages (kind "tags"), listed by `bevara tags`; update-page writes them so the page works as is | 2026-10-16 |
 
 ---
 
@@ -346,4 +347,24 @@ that it is not the pinned version), and stops otherwise. A custom
   (`build`, `pack --build`, `publish --build`)
 - Checked by: `cli/test/emsdk-provision.test.js` (every branch, with stand-ins for the download); by hand,
   a build with no SDK in the PATH and `BEVARA_EMSDK_HOME` set builds libjxl with its environment
+
+### R28
+**The tag scripts are packages of kind `"tags"`**, so that `update-page --write`
+leaves a page that works as is: it writes `universal-img_1.js` (and the other
+scripts the page loads) from the registry, as it does the solver and the
+accessors. A tags package lists its scripts (`"tags"`), all of one generation;
+`bevara publish --build` in the player (`universal-tags.json`, built by
+`npm run build` into `build/dist`) publishes the five universal scripts. Any
+authenticated account may publish tags packages - new tags, or tags that extend
+existing ones (`"extends": {"my-img_1.js": "universal-img_1"}`, warned about
+when the base is not published); script names are reserved like accessor
+names. `bevara tags` lists them beside `bevara filters` and `bevara runtimes`.
+The licence notices of the code webpack bundles stay inside each script, which
+is copied alone next to a page.
+
+- Where: `kind: "tags"` in `manifest.js`; publish, `/accessors/<script>`, `index.json` `tags` in `registry/src/app.js`;
+  `checkTagScripts`/`packFilter` in `cli/src/lib/pack.js`; `locateSources` in `page-files.js`; `bevara tags` in `list.js`;
+  the player's `universal-tags.json` and `templates/template.webpack.config.js`
+- Checked by: `registry.test.js` "tag scripts (kind \"tags\")", `cli/test/tags.test.js`, e2e step "publish the tag scripts";
+  by hand, update-page without --runtime on the JXL page, which then decodes in Chromium
 
