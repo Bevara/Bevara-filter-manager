@@ -224,3 +224,21 @@ describe('matching prefers a declared format to a matching extension', async () 
     assert.deepEqual(r.with, ['libxmp_1']);
   });
 });
+
+describe('the priority of the filter doing the work', async () => {
+  const { needsOf, resolvePipeline } = await import('../src/lib/capabilities.js');
+  const raw = [{ property: 'GF_PROP_PID_CODECID', format: 'GF_CODECID_RAW' }];
+  const index = {
+    filters: [
+      { name: 'bevara:ffmpeg-flac', file: 'ffmpeg-flac_1.wasm', formats: ['FLAC'], priority: 0, using: ['solver_1'], caps: [
+        { filter: 'ffdec', priority: 128, bundles: [{ inputs: [], outputs: raw }] },
+        { filter: 'rfflac', priority: 0, bundles: [{ inputs: [{ property: 'GF_PROP_PID_STREAM_TYPE', format: 'GF_STREAM_FILE' }], outputs: [] }] }] },
+      { name: 'bevara:libflac', file: 'libflac_1.wasm', formats: ['flac'], priority: 0, using: ['solver_1'], caps: [{ filter: 'flacdec', priority: 0, bundles: [{ inputs: [], outputs: raw }] }] },
+    ],
+    runtimes: [{ module: 'solver_1' }],
+  };
+  test('a native decoder at 0 comes before ffmpeg at 128, whatever their reframers', () => {
+    const needs = needsOf([{ '@type': 'General', Format: 'FLAC' }, { '@type': 'Audio', Format: 'FLAC' }], { ext: 'flac' });
+    assert.deepEqual(resolvePipeline(needs, index).with, ['libflac_1']);
+  });
+});

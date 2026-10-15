@@ -79,6 +79,19 @@ export const fitsSolver = (entry, solver) => !entry.using?.length || entry.using
 // The solvers the player ships, most capable for the fewest bytes first.
 export const KNOWN_SOLVERS = ['solver_minimal_1', 'solver_1'];
 
+/* The GPAC priority that matters for a need (lower is preferred): that of the
+ * accessor's filter doing the work - for a decode, the one that outputs raw
+ * media (ffmpeg's ffdec at 128, not its reframer at 0); for a demultiplex,
+ * the one that reads a file. Without published caps, the accessor's own. */
+function priorityFor(entry, need) {
+  const caps = Array.isArray(entry.caps) ? entry.caps : [];
+  const outputsRaw = (c) => (c.bundles ?? []).some((b) => (b.outputs ?? []).some((o) => o.property === 'GF_PROP_PID_CODECID' && !o.excluded && o.format === 'GF_CODECID_RAW'));
+  const readsFiles = (c) => (c.bundles ?? []).some((b) => (b.inputs ?? []).some((i) => i.property === 'GF_PROP_PID_STREAM_TYPE' && !i.excluded && i.format === 'GF_STREAM_FILE'));
+  const doing = caps.filter(need.role === 'decode' ? outputsRaw : need.role === 'demux' || need.role === 'read' ? readsFiles : () => false);
+  if (doing.length) return Math.min(...doing.map((c) => c.priority ?? 0));
+  return entry.priority ?? 50;
+}
+
 /**
  * Answers each need from the registry index, among the accessors that link
  * against `solver` when one is given.
@@ -90,9 +103,10 @@ export function resolveNeeds(needs, index, { solver } = {}) {
   // An accessor that declares the format comes before one whose extension
   // merely matches: the Ogg demultiplexer, not the Opus decoder, reads a .opus.
   const rank = { format: 0, extension: 1 };
+  const prio = (e, need) => priorityFor(e, need);
   const resolved = needs.map((need) => {
     const candidates = entries.map((e) => ({ ...e, match: fits(e, need) })).filter((e) => e.match)
-      .sort((a, b) => rank[a.match] - rank[b.match] || (a.priority ?? 50) - (b.priority ?? 50) || a.module.localeCompare(b.module));
+      .sort((a, b) => rank[a.match] - rank[b.match] || prio(a, need) - prio(b, need) || a.module.localeCompare(b.module));
     return { ...need, candidates, chosen: candidates[0] ?? null };
   });
   const withList = [];
