@@ -93,9 +93,25 @@ export function resolveNeeds(needs, index, { solver } = {}) {
   return { needs: resolved, with: withList, missing: resolved.filter((n) => !n.chosen) };
 }
 
-/* Every solver worth trying, `prefer` first, then those the player ships, then
- * any other a published accessor names. */
+/* The runtimes the registry publishes (its index lists them), or null for a
+ * registry that predates runtime packages. */
+export const publishedRuntimes = (index) => (Array.isArray(index?.runtimes) ? index.runtimes.map((r) => r.module) : null);
+
+/* The runtimes every list allows: the intersection of the "using" of the
+ * accessors of one combination. Accessors that declare none are left out of
+ * the intersection (they are reported apart). */
+export function commonRuntimes(usings) {
+  const declared = usings.filter((u) => Array.isArray(u) && u.length);
+  if (!declared.length) return null;
+  return declared.reduce((a, b) => a.filter((x) => b.includes(x)));
+}
+
+/* Every solver worth trying, `prefer` first. With a registry that lists its
+ * runtimes, only those: a page cannot load a solver nobody publishes. Before
+ * runtime packages, the solvers the player ships and those accessors name. */
 export function solverOrder(index, prefer) {
+  const published = publishedRuntimes(index);
+  if (published) return [...new Set([prefer, ...KNOWN_SOLVERS, ...published].filter((s) => s && published.includes(s)))];
   const all = [prefer, ...KNOWN_SOLVERS, ...(index?.filters ?? []).flatMap((e) => e.using ?? [])].filter(Boolean);
   return [...new Set(all)];
 }
@@ -110,14 +126,27 @@ export function solverOrder(index, prefer) {
 export function resolvePipeline(needs, index, { prefer } = {}) {
   const bySolver = new Map(solverOrder(index, prefer).map((s) => [s, resolveNeeds(needs, index, { solver: s })]));
   const fitsAll = [...bySolver].filter(([, r]) => !r.missing.length).map(([s]) => s);
-  if (fitsAll.length) return { ...bySolver.get(fitsAll[0]), using: fitsAll[0], fits: fitsAll, bySolver, conflict: null };
+  if (fitsAll.length) {
+    const r = bySolver.get(fitsAll[0]);
+    return { ...r, using: fitsAll[0], fits: fitsAll, bySolver, conflict: null, unpublishedRuntimes: null,
+      undeclared: r.needs.map((n) => n.chosen).filter((e) => e && !e.using?.length).map((e) => e.module) };
+  }
   // No solver serves everything: either something is not published at all, or
   // the accessors that exist disagree on the solver.
   const free = resolveNeeds(needs, index);
   const conflict = free.missing.length ? null
     : free.needs.map((n) => n.chosen).filter((e) => e.using?.length).map((e) => ({ module: e.module, using: e.using }));
   // Reported without the solver filter, so "missing" means "not published".
-  return { ...free, using: prefer ?? KNOWN_SOLVERS[0], fits: [], bySolver, conflict };
+  // Accessors that agree on a runtime the registry does not publish are not
+  // in conflict: that runtime is missing.
+  const chosen = free.needs.map((n) => n.chosen).filter(Boolean);
+  const shared = free.missing.length ? null : commonRuntimes(chosen.map((e) => e.using));
+  const published = publishedRuntimes(index);
+  const unpublished = shared?.length && published ? shared.filter((s) => !published.includes(s)) : null;
+  const noRuntimes = !!published && !published.length && !free.missing.length;
+  return { ...free, using: prefer ?? KNOWN_SOLVERS[0], fits: [], bySolver, noRuntimes,
+    conflict: unpublished?.length || noRuntimes || !conflict?.length ? null : conflict, unpublishedRuntimes: unpublished?.length ? unpublished : null,
+    undeclared: chosen.filter((e) => !e.using?.length).map((e) => e.module) };
 }
 
 /* One solver for a whole page: the loader keeps the first solver it loads, so

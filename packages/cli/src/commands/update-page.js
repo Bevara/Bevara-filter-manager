@@ -158,6 +158,14 @@ export async function run({ args, opts }) {
         report.elements.push({ line, tag: tag.name, src, format: info.format, skipped: `nothing on this registry can ${pipeline.missing.map(describeNeed).join(', ')}` });
         continue;
       }
+      if (pipeline?.noRuntimes && !pipeline.unpublishedRuntimes) {
+        report.elements.push({ line, tag: tag.name, src, format: info.format, skipped: 'this registry publishes no runtime (solver) yet' });
+        continue;
+      }
+      if (pipeline?.unpublishedRuntimes) {
+        report.elements.push({ line, tag: tag.name, src, format: info.format, skipped: `its accessors link against ${pipeline.unpublishedRuntimes.join(' or ')}, which this registry does not publish` });
+        continue;
+      }
       if (pipeline?.conflict) {
         report.elements.push({ line, tag: tag.name, src, format: info.format, skipped: `no solver links all its accessors: ${pipeline.conflict.map((c) => `${c.module} needs ${c.using.join(' or ')}`).join(', ')}` });
         continue;

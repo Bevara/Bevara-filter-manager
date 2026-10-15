@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { log, color, table, formatBytes, CliError } from '../lib/ui.js';
 import { Project } from '../lib/ctx.js';
-import { runSession, requireSolver, missingModules, verdict, median } from '../lib/runner.js';
+import { runSession, requireSolver, missingModules, verdict, median, solverForCombination } from '../lib/runner.js';
 import { accessorsDirFor, probeFile } from './test.js';
 
 export const options = {
@@ -67,7 +67,16 @@ export async function run({ args, opts }) {
         process.exitCode = 1;
         continue;
       }
-      const solver = requireSolver(dir, info.kind, opts.solver);
+      // A page loads one solver: the accessors must share a runtime, and the run uses it.
+      let solver;
+      try { ({ solver } = solverForCombination(dir, info.kind, opts.solver, modules)); }
+      catch (e) {
+        if (!(e instanceof CliError)) throw e;
+        if (!opts.json) log.error(`  ${e.message}${e.hint ? ` (${e.hint})` : ''}`);
+        results.push({ file, modules, missing: [], incompatible: e.message, runs: [] });
+        process.exitCode = 1;
+        continue;
+      }
       const job = {
         accessorsDir: dir, solver, modules, inputFile: file,
         inputExt: path.extname(file).slice(1) || undefined, kind: info.kind ?? 'video',

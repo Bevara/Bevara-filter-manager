@@ -330,7 +330,7 @@ export function createApp(config = {}) {
       const m = r.manifest ? JSON.parse(r.manifest) : {};
       return {
         name: r.name, namespace: splitName(r.name).namespace, latest: r.latest, description: r.description, deprecated: r.deprecated,
-        kind: m.kind ?? 'filter', abi: r.abi, file: r.wasm_file, size: r.wasm_size, brSize: r.wasm_br_size,
+        kind: m.kind ?? 'filter', using: m.using, builtins: m.builtins, abi: r.abi, file: r.wasm_file, size: r.wasm_size, brSize: r.wasm_br_size,
         filters: m.filters ?? [], support: m.support ?? [], formats: m.formats ?? [], keywords: m.keywords ?? [],
         license: m.license, licence_required: !!m.licence_required, priority: m.priority,
         downloads: q.downloads.get(r.name).n, updated: r.updated_at,

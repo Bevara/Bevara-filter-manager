@@ -91,7 +91,7 @@ function print(result, opts, registry) {
   for (const w of r.warnings) if (!tracks) log.warn(w);
 
   const el = result.element;
-  if (!match || match.missing.length || match.conflict || !match.with.length || !el) return console.log();
+  if (!match || match.missing.length || match.conflict || match.unpublishedRuntimes || match.noRuntimes || !match.with.length || !el) return console.log();
   const attrs = `${el === 'canvas' ? 'data-url' : 'src'}="${name}" using="${match.using}" with="${match.with.join(';')}"${el === 'audio' ? ' controls' : ''}`;
   console.log(`\n  ${color.dim(`<${el} is="universal-${el}_1" ${attrs}>`)}\n`);
 }
@@ -112,10 +112,17 @@ function printResolved(match, opts, registry) {
       console.log(table(alt, { indent: '    ' }));
     }
   }
-  if (match.conflict) {
+  if (match.noRuntimes && !match.unpublishedRuntimes) {
+    log.warn('this registry publishes no runtime (solver) yet: no page can load these accessors from it');
+    log.info(color.dim('  publish one: bevara publish --build in Editor/Interface/player/solver_minimal or solver'));
+  } else if (match.unpublishedRuntimes) {
+    log.warn(`these accessors link against ${match.unpublishedRuntimes.join(' or ')}, which this registry does not publish: no page could load them together`);
+    log.info(color.dim(`  publish the runtime: bevara publish --build in its directory (Editor/Interface/player/${match.unpublishedRuntimes[0].replace(/_\d+$/, '')})`));
+  } else if (match.conflict) {
     log.warn(`no solver links all these accessors: ${match.conflict.map((c) => `${c.module} needs ${c.using.join(' or ')}`).join(', ')}`);
     log.info(color.dim('  a page loads one solver: publish a variant of one of them for the other solver, or widen its "using"'));
   } else if (match.with.length && !match.missing.length) console.log(color.dim(`    solver ${match.using}${match.fits.length > 1 ? ` (also fits ${match.fits.slice(1).join(', ')})` : ''}`));
+  if (match.undeclared?.length) log.warn(`${match.undeclared.join(', ')} ${match.undeclared.length > 1 ? 'declare' : 'declares'} no runtime ("using"): ${match.undeclared.length > 1 ? 'their' : 'its'} compatibility with ${match.using} is assumed - republish ${match.undeclared.length > 1 ? 'them' : 'it'}`);
   if (match.missing.length) {
     log.warn(`this registry cannot play the file yet: nothing published can ${match.missing.map(describeNeed).join(', ')}`);
     const formats = [...new Set(match.missing.filter((n) => n.format).map((n) => n.format))];

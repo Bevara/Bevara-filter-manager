@@ -36,6 +36,7 @@ these requirements, and the alternatives rejected, are in
 | [R21](#r21) | `update-page --write` also puts the scripts, the solver and the accessors where the page loads them | 2026-10-15 |
 | [R22](#r22) | Runtimes (solvers) are packages any authenticated account publishes from their source directories | 2026-10-15 |
 | [R23](#r23) | A filter must name its runtimes in "using", and at least one must be published on the registry | 2026-10-15 |
+| [R24](#r24) | Every combination proposed for a file shares a runtime; `list` shows the runtimes | 2026-10-15 |
 
 ---
 
@@ -274,3 +275,21 @@ warnings. A registry may carry several runtimes, one per environment.
 - Where: `validateManifest` (shared), the publish route in `registry/src/app.js`, the pre-build check in `cli/src/commands/publish.js`
 - Checked by: `registry.test.js` "a filter cannot be published before the runtime…", "then the filter publishes…",
   `cli/test/page-files.test.js` "a filter must name its runtimes", e2e; every filter repository declares it (libmidi was added)
+
+### R24
+**Every combination of filters proposed for a file links against one common
+runtime**, published on the registry: a page loads a single solver. `probe`
+and `update-page` choose the solver among the runtimes the registry publishes
+and every chosen accessor declares; accessors that agree on a runtime the
+registry lacks, or a registry with no runtime at all, are reported as such
+(not as a conflict), and an accessor without `"using"` is flagged. `test` and
+`bench` refuse a combination (automatic or `-W`) whose installed accessors
+share no runtime, and run it with one they share (`--solver` must be one).
+`bevara list` shows each filter's runtimes - in red when the registry does not
+publish them - and the published runtimes with their built-in filters; in a
+site, each installed filter's runtimes and the `using="…"` they all share.
+
+- Where: `resolvePipeline`, `solverOrder`, `commonRuntimes` in `cli/src/lib/capabilities.js`;
+  `solverForCombination` in `cli/src/lib/runner.js`; `cli/src/commands/list.js`
+- Checked by: `cli/test/capabilities.test.js` "a combination shares a runtime"
+

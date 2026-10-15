@@ -5,7 +5,7 @@ import { Project } from '../lib/ctx.js';
 import { sniff, CONTAINER_MODULES } from '../lib/sniff.js';
 import { VIDEO_TAIL } from '../lib/formats.js';
 import { readLocal } from '../lib/source.js';
-import { runSession, requireSolver, missingModules, findSolver } from '../lib/runner.js';
+import { runSession, requireSolver, missingModules, findSolver, solverForCombination } from '../lib/runner.js';
 
 export const options = {
   with: { type: 'string', multiple: true, short: 'W' },
@@ -59,13 +59,16 @@ export async function probeFile(file) {
 export async function runCase(file, modules, info, dir, opts) {
   const missing = missingModules(dir, modules);
   if (missing.length) return { modules, missing, result: null };
-  const solver = requireSolver(dir, info.kind, opts.solver);
+  // A page loads one solver: the accessors must share a runtime, and the run uses it.
+  let solver, undeclared = [];
+  try { ({ solver, undeclared } = solverForCombination(dir, info.kind, opts.solver, modules)); }
+  catch (e) { if (e instanceof CliError) return { modules, missing: [], result: null, incompatible: e }; throw e; }
   const result = await runSession({
     accessorsDir: dir, solver, modules,
     inputFile: file, inputExt: path.extname(file).slice(1) || undefined,
     kind: info.kind ?? 'video', verbose: opts.verbose,
   }, { timeoutMs: (parseInt(opts.timeout ?? '120', 10) || 120) * 1000 });
-  return { modules, missing: [], result, solver };
+  return { modules, missing: [], result, solver, undeclared };
 }
 
 export async function run({ args, opts }) {
@@ -88,7 +91,7 @@ export async function run({ args, opts }) {
       const v = c.result ? verdict(c.result, { expectDecoders: opts.expect ?? [] }) : null;
       reports.push({ file, format: info.format, kind: info.kind, ...c, verdict: v });
       if (!opts.json) print({ file, info, ...c, verdict: v }, opts);
-      if (c.missing.length || !v?.pass) process.exitCode = 1;
+      if (c.missing.length || c.incompatible || !v?.pass) process.exitCode = 1;
     }
   }
 
@@ -106,8 +109,15 @@ export async function run({ args, opts }) {
   }
 }
 
-function print({ file, info, modules, missing, result, verdict: v, solver }, opts) {
+function print({ file, info, modules, missing, result, verdict: v, solver, incompatible, undeclared = [] }, opts) {
   const head = `${color.bold(path.basename(file))} ${color.dim(`${info.format ?? '?'} · ${modules.join(';')}`)}`;
+  if (incompatible) {
+    console.log(`${color.red('✖')} ${head}`);
+    log.error(`  ${incompatible.message}`);
+    if (incompatible.hint) console.log(color.dim(`  ${incompatible.hint}\n`));
+    return;
+  }
+  if (undeclared.length) log.warn(`  ${undeclared.join(', ')}: no "using" next to ${undeclared.length > 1 ? 'them' : 'it'} in the accessors directory; compatibility with ${solver} assumed`);
   if (missing.length) {
     console.log(`${color.red('✖')} ${head}`);
     log.error(`  not in the accessors directory: ${missing.join(', ')}`);

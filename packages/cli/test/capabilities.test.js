@@ -155,3 +155,46 @@ describe('mediainfo', () => {
     assert.equal(t?.find((x) => x['@type'] === 'General')?.Format, undefined);
   });
 });
+
+describe('a combination shares a runtime', async () => {
+  const { resolvePipeline, commonRuntimes, solverOrder } = await import('../src/lib/capabilities.js');
+  const { combinationRuntimes, solverForCombination } = await import('../src/lib/runner.js');
+  const fsm = await import('node:fs'); const osm = await import('node:os'); const pathm = await import('node:path');
+  const needs = [{ role: 'demux', format: 'Ogg', ext: 'ogg', byExtension: true }, { role: 'decode', type: 'video', format: 'Theora' }];
+  const ogg = (using) => ({ name: 'bevara:ogg', file: 'ogg_1.wasm', formats: ['Ogg'], using });
+  const theora = (using) => ({ name: 'bevara:theora', file: 'theora_1.wasm', formats: ['Theora'], using });
+
+  test('the solver is a runtime the registry publishes, common to every accessor', () => {
+    const index = { filters: [ogg(['solver_minimal_1', 'solver_1']), theora(['solver_1'])], runtimes: [{ module: 'solver_1' }, { module: 'solver_minimal_1' }] };
+    const r = resolvePipeline(needs, index);
+    assert.equal(r.using, 'solver_1');
+    assert.deepEqual(r.fits, ['solver_1']);
+    assert.deepEqual(solverOrder({ runtimes: [{ module: 'solver_x_1' }] }, 'solver_1'), ['solver_x_1']);
+  });
+
+  test('a shared runtime the registry does not publish, and no runtime at all, are said as such', () => {
+    const r = resolvePipeline(needs, { filters: [ogg(['solver_1']), theora(['solver_1'])], runtimes: [{ module: 'solver_minimal_1' }] });
+    assert.deepEqual(r.unpublishedRuntimes, ['solver_1']);
+    assert.equal(r.conflict, null);
+    const none = resolvePipeline(needs, { filters: [ogg(undefined), theora(undefined)], runtimes: [] });
+    assert.equal(none.noRuntimes, true);
+    assert.equal(none.conflict, null);
+    assert.deepEqual(none.undeclared, ['ogg_1', 'theora_1']);
+    const clash = resolvePipeline(needs, { filters: [ogg(['solver_minimal_1']), theora(['solver_1'])], runtimes: [{ module: 'solver_1' }, { module: 'solver_minimal_1' }] });
+    assert.ok(clash.conflict?.length);
+    assert.deepEqual(commonRuntimes([['a_1', 'b_1'], null, ['b_1']]), ['b_1']);
+  });
+
+  test('test and bench run a combination with a runtime its installed accessors share, or refuse it', () => {
+    const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), 'bevara-rt-'));
+    for (const f of ['solver_1.js', 'solver_1.wasm', 'solver_minimal_1.js', 'solver_minimal_1.wasm', 'ogg_1.wasm', 'theora_1.wasm']) fsm.writeFileSync(pathm.join(dir, f), '');
+    fsm.writeFileSync(pathm.join(dir, 'ogg.json'), JSON.stringify({ using: ['solver_minimal_1'] }));
+    fsm.writeFileSync(pathm.join(dir, 'theora.json'), JSON.stringify({ using: ['solver_minimal_1', 'solver_1'] }));
+    assert.equal(solverForCombination(dir, 'video', undefined, ['ogg_1', 'theora_1']).solver, 'solver_minimal_1');
+    assert.throws(() => solverForCombination(dir, 'video', 'solver_1', ['ogg_1', 'theora_1']), /link against solver_minimal_1/);
+    fsm.writeFileSync(pathm.join(dir, 'theora.json'), JSON.stringify({ using: ['solver_1'] }));
+    assert.throws(() => solverForCombination(dir, 'video', undefined, ['ogg_1', 'theora_1']), /no runtime common/);
+    assert.deepEqual(combinationRuntimes(dir, ['ogg_1', 'x_1']).undeclared, ['x_1']);
+    fsm.rmSync(dir, { recursive: true, force: true });
+  });
+});

@@ -358,6 +358,11 @@ must be published on the registry (the others are warnings): a registry may
 carry several runtimes, per environment, and an accessor whose every solver is
 missing could not be loaded by any page. The CLI checks it before building,
 the registry at upload.
+- *Consequences*: a combination is only proposed with a runtime common to all
+  its accessors and published on the registry (`solverOrder` draws from the
+  index's `runtimes`; before runtime packages, from the solvers the player
+  ships). An accessor without `"using"` (published by an older CLI) is assumed
+  compatible and flagged, so that existing pages are not broken by the rule.
 
 ## 8. Identifying media: probe
 

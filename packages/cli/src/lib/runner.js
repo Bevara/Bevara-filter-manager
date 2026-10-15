@@ -15,12 +15,49 @@ const RUNNER = path.join(path.dirname(fileURLToPath(import.meta.url)), 'run-sess
 /* A run needs the player's main module next to the accessors: the registry
  * distributes accessors, not the solver, so we look for it where the page
  * would load it from. */
-export function findSolver(dir, kind, forced) {
+export function findSolver(dir, kind, forced, allowed = null) {
   // solver_1 first: solver_minimal_1 runs the same pipelines but prints no
   // session statistics, so a report made from it would have no per-filter data.
-  const prefer = forced ? [forced] : ['solver_1', 'solver_minimal_1'];
+  const prefer = forced ? [forced] : [...new Set(['solver_1', 'solver_minimal_1', ...(allowed ?? [])])].filter((s) => !allowed || allowed.includes(s));
   for (const s of prefer) if (fs.existsSync(path.join(dir, `${s}.js`)) && fs.existsSync(path.join(dir, `${s}.wasm`))) return s;
   return null;
+}
+
+/* The "using" of the accessors of a combination, from the manifests installed
+ * next to them (<package>.json, written by bevara install), and the runtimes
+ * they have in common. common is null when none declares any. */
+export function combinationRuntimes(dir, modules) {
+  const usings = modules.map((m) => {
+    const base = m.replace(/_\d+$/, '');
+    for (const f of [`${base}.json`, `${base.toLowerCase()}.json`]) {
+      try { return { module: m, using: JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')).using ?? null }; } catch { /* not installed by bevara */ }
+    }
+    return { module: m, using: null };
+  });
+  const declared = usings.filter((u) => Array.isArray(u.using) && u.using.length);
+  const common = declared.length ? declared.map((u) => u.using).reduce((a, b) => a.filter((x) => b.includes(x))) : null;
+  return { usings, common, undeclared: usings.filter((u) => !u.using?.length).map((u) => u.module) };
+}
+
+/* The solver to run a combination with: one the accessors have in common (and
+ * --solver must be one of them). Throws a CliError explaining an impossible one. */
+export function solverForCombination(dir, kind, forced, modules) {
+  const rt = combinationRuntimes(dir, modules);
+  if (rt.common && !rt.common.length) {
+    throw new CliError(`${modules.join(';')}: no runtime common to these accessors`, {
+      hint: rt.usings.filter((u) => u.using?.length).map((u) => `${u.module} needs ${u.using.join(' or ')}`).join(', ') + ' - a page loads one solver',
+    });
+  }
+  if (forced && rt.common && !rt.common.includes(forced)) {
+    throw new CliError(`--solver ${forced}: these accessors link against ${rt.common.join(' or ')}`);
+  }
+  const solver = findSolver(dir, kind, forced, rt.common);
+  if (!solver) {
+    throw new CliError(`${forced ? `solver "${forced}"` : rt.common ? `no runtime among ${rt.common.join(', ')}` : 'no solver'} found in ${dir}`, {
+      hint: 'the solver is the player\'s main module: install it (bevara install bevara:solver_1), or copy <solver>.js/.wasm next to the accessors',
+    });
+  }
+  return { solver, ...rt };
 }
 
 export function requireSolver(dir, kind, forced) {

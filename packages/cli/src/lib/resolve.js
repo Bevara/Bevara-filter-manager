@@ -133,6 +133,7 @@ export async function installResolved(client, project, chosen, { registry, quiet
       version, abi: doc.abi, file: doc.dist.file, integrity: doc.dist.integrity, resolved: doc.dist.wasm,
       ...(doc.dist.jsFile ? { jsFile: doc.dist.jsFile, jsIntegrity: doc.dist.jsIntegrity } : {}),
       license: doc.license, dependencies: doc.dependencies ?? {}, signature,
+      ...(doc.kind === 'runtime' ? { kind: 'runtime' } : { using: doc.using ?? [] }),
     };
     if (packument?.deprecated && !quiet) log.warn(`${name} is deprecated: ${packument.deprecated}`);
     if (doc.deprecated && !quiet) log.warn(`${name}@${version} is deprecated: ${doc.deprecated}`);
