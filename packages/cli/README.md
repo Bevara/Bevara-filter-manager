@@ -30,7 +30,7 @@ only needed to publish.
 ```bash
 bevara probe movie.mkv                  # what the file holds, and the accessors it needs
 bevara update-page index.html           # shows how <img>/<video>/<audio> would become universal tags
-bevara update-page index.html --write --install   # apply it, and install those accessors
+bevara update-page index.html --write   # apply it: also writes the scripts, solver and accessors it loads
 ```
 
 Or manage the accessors yourself:

@@ -44,6 +44,9 @@ export async function run({ args, opts }) {
   const license = await ask('Licence (SPDX identifier, written to LICENCE)', 'MIT');
   const holder = await ask('Copyright holder', 'Bevara');
   const sources = await ask('Sources URL', `https://github.com/Bevara/${name}`);
+  // Required to publish: the runtimes (solvers) the module links against, each
+  // published on the registry (a registry may carry several, per environment).
+  const using = await ask('Runtimes it links against, as pages name them (comma separated)', 'solver_1', { validate: (v) => (v.split(',').map((x) => x.trim()).filter(Boolean).every((u) => /^[A-Za-z0-9][A-Za-z0-9._-]*_\d+$/.test(u)) ? null : 'e.g. solver_1, solver_minimal_1') });
   const split = (s) => s.split(',').map((x) => x.trim()).filter(Boolean);
 
   // Same shape and indentation as the existing filter repositories' manifests
@@ -62,6 +65,7 @@ export async function run({ args, opts }) {
     support: split(support),
     Format: split(formats),
     licence_required: false,
+    using: split(using),
     sources, filter_source: Object.fromEntries(split(gpacFilter).map((f) => [f, `src/${name}.c`])),
     inputs: [{ stream_type: 'visual', codec: name }], outputs: [{ stream_type: 'visual', codec: 'raw' }],
   };

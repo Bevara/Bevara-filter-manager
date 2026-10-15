@@ -33,6 +33,9 @@ these requirements, and the alternatives rejected, are in
 | [R18](#r18) | `--build` builds under `.bevara/` by default, which repositories ignore in git | 2026-10-07 |
 | [R19](#r19) | Anyone reads the registry without an account; any authenticated account publishes filters | 2026-10-08 |
 | [R20](#r20) | Accessors are selected by capability, priority, size, licence, project — the paper's query | 2026-10-10 |
+| [R21](#r21) | `update-page --write` also puts the scripts, the solver and the accessors where the page loads them | 2026-10-15 |
+| [R22](#r22) | Runtimes (solvers) are packages any authenticated account publishes from their source directories | 2026-10-15 |
+| [R23](#r23) | A filter must name its runtimes in "using", and at least one must be published on the registry | 2026-10-15 |
 
 ---
 
@@ -229,3 +232,45 @@ output — and cannot be read from it is declared in `<name>.json` under
 - Checked by: `cli/test/caps.test.js`, `cli/test/select.test.js` (the query pasted from
   the paper; the two copies of select.js are identical), `registry.test.js` "selection by capability"
 
+### R21
+**`bevara update-page --write` leaves a working page**: besides the HTML, it
+writes the files the page then loads — the `universal-*_N.js` scripts its
+`<script>` tags name, the solver of `using="…"` (`.js` and `.wasm`) and the
+accessors of `with="…"` — where the player looks for them: next to the page,
+the scripts under `--scripts`. Accessors come from the registry and are checked
+against its integrity hash; scripts and solvers from the registry's runtime
+files, or from local directories (`--runtime`). A file already there that
+differs is kept unless `--refresh`.
+
+- Where: `cli/src/lib/page-files.js`, `cli/src/commands/update-page.js`
+- Checked by: `cli/test/page-files.test.js`; by hand, test-jxl/index.html decodes in Chromium with what it wrote
+
+### R22
+**Runtimes are packages, published by any authenticated account from their
+source directories.** A solver directory (`Editor/Interface/player/solver`,
+`solver_minimal`) holds a `<name>.json` with `"kind": "runtime"`, a LICENCE and
+a CMakeLists.txt that builds on its own; `bevara publish --build` there builds
+`<name>_<N>.js` and `.wasm`, derives the version from `set(VERSION "N")`, the
+licence from LICENCE and the built-in filters from `loader.js`, and publishes
+both files, signed and logged. As for filters, the first publisher owns the
+name and only owners publish new versions; runtime names are accessor names,
+unique registry-wide. The registry serves them under `/accessors/` and lists
+them in `/accessors/index.json` under `runtimes`.
+
+- Where: `filterManifest`/`checkArtifact`/`packFilter` in `cli/src/lib/pack.js`, `readExecutables` in
+  `cli/src/lib/cmake.js`, `runtimeBuiltins` in `cli/src/lib/caps.js`; publish and `/accessors/*` in `registry/src/app.js`
+- Checked by: `registry.test.js` "runtimes (solvers) as packages", `cli/test/page-files.test.js` "a runtime…",
+  e2e step "publish the runtime solver_1"; by hand, both solvers built alone are byte-identical to the player's build
+
+### R23
+**A filter names the runtimes it links against in `"using"`, and at least one
+of them must be published on the registry.** A filter without `"using"` (or
+with an empty one) is refused, by the CLI and by the registry; one whose
+runtimes are all missing is refused, with the runtimes to publish first; one
+with at least one published runtime is accepted, the others reported as
+warnings. A registry may carry several runtimes, one per environment.
+`bevara init` asks for them (default `solver_1`).
+
+- Where: `validateManifest` (shared), the publish route in `registry/src/app.js`, the pre-build check in `cli/src/commands/publish.js`
+- Checked by: `registry.test.js` "a filter cannot be published before the runtime…", "then the filter publishes…",
+  `cli/test/page-files.test.js` "a filter must name its runtimes", e2e; every filter repository declares it (libmidi was added)

@@ -129,7 +129,18 @@ preferred). `runtime` merges the formats the code sets literally with those
 `<name>.json` declares (`"declared": true`). Never write `caps` by hand: the
 source is the reference. See DESIGN.md D13 and `GET /-/select` in REGISTRY_API.md.
 
-`name` and `filters` are required to publish. The compiled artifact must be a valid
+### Runtimes
+
+A solver repository has a `<name>.json` with `"kind": "runtime"` instead of
+`"filters"`: `{ "name": "solver_minimal", "kind": "runtime", "description": "…" }`.
+The generation comes from `add_executable(<name>_${VERSION})` and
+`set(VERSION "N")`, the licence from LICENCE, the published `builtins` (the
+GPAC filters it registers itself) from `loader.js`. The package carries
+`<name>_<N>.wasm` and `<name>_<N>.js`. A runtime has no `"using"`.
+
+`name` and `filters` (or `"kind": "runtime"`) are required to publish, and a
+filter needs `"using"`: the runtimes it links against, at least one of them
+published on the registry. The compiled artifact must be a valid
 Wasm binary carrying a `dylink.0` (or `dylink`) custom section — the registry refuses
 anything else, since the solver's `dlopen()` could not link it.
 

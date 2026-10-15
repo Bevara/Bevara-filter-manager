@@ -93,3 +93,25 @@ export function addFilterFor(root, name) {
   const want = String(name ?? '').toLowerCase();
   return calls.find((c) => c.name && c.name.toLowerCase() === want) ?? (calls.length === 1 ? calls[0] : null);
 }
+
+/* The executables a solver's CMakeLists.txt builds as <base>_${VERSION}
+ * (add_executable(solver_minimal_${VERSION} …) with set(VERSION "1")): each is
+ * <base>_<N>.js plus <base>_<N>.wasm. Same shape as add_filter() calls. */
+export function readExecutables(root) {
+  let text;
+  try { text = fs.readFileSync(path.join(root, 'CMakeLists.txt'), 'utf8'); } catch { return []; }
+  const src = stripComments(text);
+  const version = /\bset\s*\(\s*VERSION\s+"?([^")\s]+)"?\s*\)/i.exec(src)?.[1];
+  const out = [];
+  for (const m of src.matchAll(/\badd_executable\s*\(\s*([A-Za-z0-9.-]+(?:_[A-Za-z0-9.-]+)*?)_(\$\{VERSION\}|\d+)(?=[\s)])/gi)) {
+    const raw = m[2] === '${VERSION}' ? version ?? null : m[2];
+    out.push({ name: m[1], generation: raw && /^\d+$/.test(raw) ? parseInt(raw, 10) : null, rawGeneration: raw, line: src.slice(0, m.index).split('\n').length, via: 'add_executable' });
+  }
+  return out;
+}
+
+export function executableFor(root, name) {
+  const calls = readExecutables(root);
+  const want = String(name ?? '').toLowerCase();
+  return calls.find((c) => c.name.toLowerCase() === want) ?? (calls.length === 1 ? calls[0] : null);
+}

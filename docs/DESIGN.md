@@ -320,6 +320,45 @@ compressed once at publish time.
 resolution needs. `/accessors/filter_list.json` reproduces the format of the
 filters repository so existing wrappers work unchanged.
 
+**D7.3 — Runtimes are packages of kind "runtime".**
+A solver is published like a filter: a `<name>.json` with `"kind": "runtime"`,
+versions, owners, signature, log entry, licence. Its package carries
+`<name>_<N>.wasm` and `<name>_<N>.js`; the signed record covers both
+(`jsSha256`), `/accessors/<name>_<N>.js|.wasm` serve the newest version of that
+generation, and `/accessors/index.json` lists runtimes apart from accessors
+(`runtimes`), so that capability selection and probing never pick a solver as
+an accessor.
+- *Why*: publishing is open to every account; a name that anyone could
+  re-upload would let anyone replace the solver every page loads. Ownership,
+  immutable versions and the log are what packages already give, and
+  `/accessors/<name>_<N>` already serves the newest version of a generation, so
+  a fixed solver keeps its URL.
+- *Rejected*: a separate store of "runtime files" uploaded by administrators
+  (first implemented, never deployed): it bent publishing to one role and
+  duplicated what packages do.
+- *Consequences*: runtime names share the accessor-name space; the tag scripts
+  (`universal-*_N.js`) are not runtimes and are not published (update-page takes
+  them from `--runtime`).
+
+**D7.4 — A solver directory builds on its own.**
+`player/solver` and `player/solver_minimal` were subdirectories of the player's
+CMake project only. A guarded block (`if(CMAKE_SOURCE_DIR STREQUAL
+CMAKE_CURRENT_SOURCE_DIR)`) now gives them, when built alone, what the player
+gives them — `project()`, Release by default, C++20, `-fpic`, one output
+directory — and the paths into the player's tree are gone; inside the player
+the block is skipped. The executable `<base>_${VERSION}` gives the module and
+the generation (`readExecutables`), `loader.js` the built-in filters, LICENCE
+the licence (LGPL-2.1-or-later: GPAC is linked statically),
+`third_parties/emsdk_vers.txt` the SDK. Built alone, both are byte-identical to
+the player's build.
+
+**D7.5 — "using" binds filters to runtimes.**
+`"using"` is required to publish a filter, and at least one runtime it names
+must be published on the registry (the others are warnings): a registry may
+carry several runtimes, per environment, and an accessor whose every solver is
+missing could not be loaded by any page. The CLI checks it before building,
+the registry at upload.
+
 ## 8. Identifying media: probe
 
 **D8.1 — Probe reads structure, not samples, and only the ends of a file.**
@@ -384,6 +423,24 @@ and running the command twice changes nothing.
 
 **D9.2 — Nothing is written without `--write`.**
 By default the command prints the diff.
+
+**D9.4 — `--write` puts what the page loads next to it.**
+From the rewritten HTML: the `universal-*_N.js` of its relative `<script>`
+tags, and for each universal element the solver pair of `using` and the
+accessors of `with`, resolved against the page. The player resolves those
+against the page unless `script-directory` is set — and it honours
+`script-directory` only as an absolute URL (it checks that `dir + file` is a
+URL and otherwise loads nothing), so a relative layout such as `accessors/`
+cannot work: the files go next to the page, as in the Showcase pages. An
+element with an absolute `script-directory` needs nothing copied.
+- Sources: accessors and solvers (runtime packages, D7.3) from the registry
+  index, checked against their integrity; `--runtime` directories are looked
+  in first, and are where the tag scripts come from.
+- A file already there with other bytes is kept (it may be a module built by
+  hand) unless `--refresh`; the same bytes are left alone. Without `--write`,
+  the same list is shown as what would be added.
+- `--install` remains the site-project workflow (bevara.json, lockfile,
+  signature checks); `--no-files` rewrites the HTML only.
 
 **D9.3 — It refuses what would be wrong rather than guessing.**
 A `customized built-in` must match the element it extends: an `<img>` pointing at

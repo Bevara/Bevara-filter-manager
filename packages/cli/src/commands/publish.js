@@ -46,6 +46,22 @@ export async function run({ args, opts }) {
     // Before building: a registry that cannot take the upload makes the build pointless.
     assertRegistryVersion(await client.ping(), registry);
   }
+  // At least one runtime "using" names must be published: the registry refuses
+  // the upload otherwise, so say it before building. The others only warn.
+  const using = project.manifest.kind === 'runtime' ? [] : project.manifest.using ?? [];
+  if (using.length) {
+    let runtimes = null;
+    try { runtimes = (await client.get('/accessors/index.json', { auth: false })).runtimes ?? null; } catch { /* checked by the registry at upload */ }
+    if (runtimes) {
+      const missing = using.filter((u) => !runtimes.some((r) => r.module === u));
+      const hint = `publish a runtime first: bevara publish --build in its directory (Editor/Interface/player/${missing[0]?.replace(/_\d+$/, '')}); published runtimes: ${runtimes.map((r) => r.module).join(', ') || 'none'}`;
+      if (missing.length === using.length) {
+        const e = new CliError(`none of the runtimes in "using" (${using.join(', ')}) is published on ${registry}`, { hint });
+        if (!opts['dry-run']) throw e;
+        log.warn(`${e.message} - the upload would be refused`);
+      } else if (missing.length) log.warn(`"using" names ${missing.join(', ')}, not published on ${registry}: pages using ${missing.length > 1 ? 'them' : 'it'} cannot load this accessor from there`);
+    }
+  }
   if (opts.build) await buildFilter(project, { buildDir });
   const r = await packFilter(project, { buildDir });
   const m = r.manifest;
@@ -55,6 +71,7 @@ export async function run({ args, opts }) {
   if (m.derived?.license) console.log(color.dim(`  licence ${m.license}, from ${m.derived.license}`));
   if (m.derived?.caps) console.log(color.dim(`  capabilities of ${m.caps.map((c) => `${c.filter} (priority ${c.priority})`).join(', ')}, from ${m.derived.caps}`));
   if (m.derived?.projects) console.log(color.dim(`  projects ${m.projects.join(', ')}, from ${m.derived.projects}`));
+  if (m.derived?.builtins) console.log(color.dim(`  runtime with built-in filters ${m.builtins.join(', ')}, from ${m.derived.builtins}`));
   console.log(table(r.entries.map((e) => [color.dim(e.path), formatBytes(e.size)]), { indent: '  ' }));
   console.log(`  ${color.dim('tarball')} ${formatBytes(r.size)}`);
   try {
@@ -74,6 +91,7 @@ export async function run({ args, opts }) {
         type: 'publish', name: fullName, version: m.version, abi: m.abi, file: wasmFile,
         wasmSha256: createHash('sha256').update(r.wasmBuffer).digest('hex'),
         tarballSha256: createHash('sha256').update(tarball).digest('hex'),
+        ...(r.jsBuffer ? { jsSha256: createHash('sha256').update(r.jsBuffer).digest('hex') } : {}),
         keyId: key.keyId, timestamp: new Date().toISOString(),
       };
       headers['x-bevara-record'] = Buffer.from(canonicalize(record)).toString('base64');

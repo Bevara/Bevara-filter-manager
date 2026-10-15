@@ -33,8 +33,11 @@ export async function makeTarball(manifest, { wasm = FIXTURE_WASM, extra = {} } 
   const pkg = path.join(dir, 'package');
   fs.mkdirSync(pkg);
   fs.writeFileSync(path.join(pkg, 'bevara.json'), JSON.stringify(manifest));
-  if (wasm) fs.writeFileSync(path.join(pkg, `${manifest.module ?? manifest.name.split(':').pop()}_${manifest.abi ?? 1}.wasm`), wasm);
-  for (const [k, v] of Object.entries(extra)) { fs.mkdirSync(path.dirname(path.join(pkg, k)), { recursive: true }); fs.writeFileSync(path.join(pkg, k), v); }
+  const base = `${manifest.module ?? manifest.name.split(':').pop()}_${manifest.abi ?? 1}`;
+  if (wasm) fs.writeFileSync(path.join(pkg, `${base}.wasm`), wasm);
+  if (manifest.kind === 'runtime') fs.writeFileSync(path.join(pkg, `${base}.js`), extra.js ?? RUNTIME_JS);
+  for (const [k, v] of Object.entries(extra)) {
+    if (k === 'js') continue; fs.mkdirSync(path.dirname(path.join(pkg, k)), { recursive: true }); fs.writeFileSync(path.join(pkg, k), v); }
   const file = path.join(dir, 'p.tgz');
   await tar.create({ gzip: true, cwd: dir, file }, ['package']);
   const buf = fs.readFileSync(file);
@@ -42,7 +45,11 @@ export async function makeTarball(manifest, { wasm = FIXTURE_WASM, extra = {} } 
   return buf;
 }
 
-export const manifest = (over = {}) => ({ name: 'dummy', version: '1.0.0', abi: 1, description: 'Dummy decoder', filters: ['dummydec'], support: ['video'], formats: ['Dummy'], license: 'MIT', ...over });
+export const manifest = (over = {}) => ({ name: 'dummy', version: '1.0.0', abi: 1, description: 'Dummy decoder', filters: ['dummydec'], support: ['video'], formats: ['Dummy'], license: 'MIT', using: ['solver_1'], ...over });
+
+// A runtime (solver): a main module and its JavaScript, kind "runtime".
+export const RUNTIME_JS = Buffer.from('var libgpac = () => {};\n');
+export const runtimeManifest = (over = {}) => ({ name: 'solver', version: '1.0.0', abi: 1, kind: 'runtime', description: 'Test solver', license: 'LGPL-2.1-or-later', builtins: ['fin', 'fout'], ...over });
 
 // token -> signing key registered for that token's user
 export const keys = new Map();
@@ -59,15 +66,30 @@ export async function signup(api, name = 'alice') {
 
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 
+// The runtimes each test registry already has, so that filters naming them in
+// "using" can be published (the registry checks it).
+const runtimesOf = new WeakMap();
+
 // Publishes like the CLI does: tarball + signed record headers (unless sign:false).
-export async function publish(api, token, m, { sign = true, record: override, key: keyOverride, ...opts } = {}) {
+// The runtimes a filter's "using" names are published first, once per registry.
+export async function publish(api, token, m, { sign = true, record: override, key: keyOverride, runtimes = true, ...opts } = {}) {
+  if (runtimes && m.kind !== 'runtime') {
+    const have = runtimesOf.get(api) ?? runtimesOf.set(api, new Set()).get(api);
+    for (const u of Array.isArray(m.using) ? m.using : []) {
+      if (have.has(u) || !/^[a-z0-9][a-z0-9._-]*_\d+$/.test(u)) continue;
+      const r = await publish(api, token, runtimeManifest({ name: u.replace(/_\d+$/, '') }));
+      if (r.status !== 201 && r.status !== 409) throw new Error(`runtime ${u}: ${JSON.stringify(r.data)}`);
+      have.add(u);
+    }
+  }
   const tarball = await makeTarball(m, opts);
   const headers = { 'content-type': 'application/gzip' };
   const key = keyOverride ?? keys.get(token);
   if (sign && key) {
     const wasm = opts.wasm ?? FIXTURE_WASM;
     const full = m.name.includes(':') ? m.name : `bevara:${m.name}`;
-    const record = { type: 'publish', name: full, version: m.version, abi: m.abi ?? 1, file: `${m.module ?? m.name.split(':').pop()}_${m.abi ?? 1}.wasm`, wasmSha256: sha(wasm), tarballSha256: sha(tarball), keyId: key.keyId, timestamp: new Date().toISOString(), ...override };
+    const record = { type: 'publish', name: full, version: m.version, abi: m.abi ?? 1, file: `${m.module ?? m.name.split(':').pop()}_${m.abi ?? 1}.wasm`, wasmSha256: sha(wasm), tarballSha256: sha(tarball),
+      ...(m.kind === 'runtime' ? { jsSha256: sha(opts.extra?.js ?? RUNTIME_JS) } : {}), keyId: key.keyId, timestamp: new Date().toISOString(), ...override };
     headers['x-bevara-record'] = Buffer.from(canonicalize(record)).toString('base64');
     headers['x-bevara-signature'] = signRecord(record, key.privateKey);
   }
