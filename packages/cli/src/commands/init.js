@@ -42,7 +42,7 @@ export async function run({ args, opts }) {
   const support = await ask(`Media kinds (${SUPPORT_VALUES.slice(0, 4).join(', ')}…, comma separated)`, 'video');
   const formats = await ask('Formats handled (comma separated)', name);
   const license = await ask('Licence (SPDX identifier, written to LICENCE)', 'MIT');
-  const holder = await ask('Copyright holder', 'Bevara');
+  const holder = await ask('Copyright holder', 'Bevara Technologies, LLC');
   const sources = await ask('Sources URL', `https://github.com/Bevara/${name}`);
   // Required to publish: the runtimes (solvers) the module links against, each
   // published on the registry (a registry may carry several, per environment).
