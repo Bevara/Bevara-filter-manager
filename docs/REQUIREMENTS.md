@@ -37,6 +37,7 @@ these requirements, and the alternatives rejected, are in
 | [R22](#r22) | Runtimes (solvers) are packages any authenticated account publishes from their source directories | 2026-10-15 |
 | [R23](#r23) | A filter must name its runtimes in "using", and at least one must be published on the registry | 2026-10-15 |
 | [R24](#r24) | Every combination proposed for a file shares a runtime; `list` shows the runtimes | 2026-10-15 |
+| [R25](#r25) | Every change to the registry comes with a new version, which is the image tag ArgoCD deploys | 2026-10-16 |
 
 ---
 
@@ -292,4 +293,18 @@ site, each installed filter's runtimes and the `using="…"` they all share.
 - Where: `resolvePipeline`, `solverOrder`, `commonRuntimes` in `cli/src/lib/capabilities.js`;
   `solverForCombination` in `cli/src/lib/runner.js`; `cli/src/commands/list.js`
 - Checked by: `cli/test/capabilities.test.js` "a combination shares a runtime"
+
+### R25
+**Any change to the registry bumps its version.** ArgoCD deploys the registry
+when the image tag in `SDK/registry/registry.yaml` changes; code changed under
+an unchanged version never reaches the cluster. The version lives in
+`packages/registry/package.json` only: `/-/ping` reports it, `deploy/k8s/build.sh`
+tags the image with it, and `deploy/k8s/registry.yaml` and
+`SDK/registry/registry.yaml` reference that tag. Order: build and push the image
+(`deploy/k8s/build.sh`), then push the SDK change that ArgoCD watches.
+
+- Where: `packages/registry/package.json`, `deploy/k8s/build.sh`, `deploy/k8s/registry.yaml`, `SDK/registry/registry.yaml`
+- Checked by: `registry.test.js` "a change to the registry comes with a new version" (git: no change
+  under `src/`, `Dockerfile` or the lockfile since the commit that set the version, unless the version
+  differs from it), "the image tag in deploy/k8s/registry.yaml is the package version", "/-/ping reports the package version"
 
