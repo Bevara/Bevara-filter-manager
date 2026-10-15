@@ -41,6 +41,7 @@ these requirements, and the alternatives rejected, are in
 | [R26](#r26) | `revert-page` brings a page back to its state before `update-page`, removing the files it added | 2026-10-16 |
 | [R27](#r27) | A build without the right emsdk offers to download it and sets up its environment; declining shows how to use one's own | 2026-10-16 |
 | [R28](#r28) | Tag scripts are packages (kind "tags"), listed by `bevara tags`; update-page writes them so the page works as is | 2026-10-16 |
+| [R29](#r29) | Only filters free of patent and licence obstacles to worldwide deployment are published on the default registry | 2026-10-16 |
 
 ---
 
@@ -376,4 +377,19 @@ is copied alone next to a page.
   the player's `universal-tags.json` and `templates/template.webpack.config.js`
 - Checked by: `registry.test.js` "tag scripts (kind \"tags\")", `cli/test/tags.test.js`, e2e step "publish the tag scripts";
   by hand, update-page without --runtime on the JXL page, which then decodes in Chromium
+
+### R29
+**The default registry carries the filters that can be deployed worldwide
+without a patent or licence obstacle.** A filter is published when its formats
+are royalty-free or their patents have expired everywhere (MP3, AC-3,
+MPEG-1/2, H.261/H.263, the Xiph and WebRTC codecs, JPEG family…), and when
+everything it links is under a free licence identified in its LICENCE (the
+GPL ones say that the accessor as a whole is GPL). Left out, in doubt or not:
+codecs with patents still asserted (HEVC, H.264, VVC, EVC, AVS2/3, AV2, AAC,
+AMR, DTS, LC3, SILK, and what a patent pool claims over VP8/VP9/AV1, SBC),
+non-free licences (Monkey's Audio), AGPL code (MuPDF, jbig2dec), and what the
+repository itself marks `licence_required` (ffdmx).
+
+- Where: the LICENCE file of each filter repository; the classification is in the 2026-10-16 publication report
+- Checked by: review - the decision is legal, not mechanical
 
