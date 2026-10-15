@@ -464,6 +464,24 @@ describe('deployment', () => {
     assert.equal(tag, pkg.version, `bump the image tag to ${pkg.version} in deploy/k8s/registry.yaml (and SDK/registry/registry.yaml)`);
   });
 
+  // ArgoCD deploys the registry when its image tag changes: code changed under
+  // an unchanged version would never reach the cluster. Since the commit that
+  // last set the version, the registry must not have changed without a new one.
+  test('a change to the registry comes with a new version', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const pkgDir = new URL('..', import.meta.url).pathname;
+    const git = (...args) => execFileSync('git', args, { cwd: pkgDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    let since;
+    try { since = git('log', '-1', '--format=%H', '-G', '"version"', '--', 'package.json'); } catch { return; }   // not a git checkout
+    if (!since) return;
+    const committed = JSON.parse(git('show', `${since}:packages/registry/package.json`)).version;
+    const current = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+    if (current !== committed) return;                     // a new version is on its way
+    const changed = git('diff', '--name-only', since, '--', 'src', 'Dockerfile', 'package-lock.json').split('\n').filter(Boolean);
+    const untracked = git('ls-files', '--others', '--exclude-standard', '--', 'src').split('\n').filter(Boolean);
+    assert.deepEqual([...changed, ...untracked], [], `the registry changed since version ${current} was set (${since.slice(0, 7)}): bump "version" in packages/registry/package.json and the image tag in deploy/k8s/registry.yaml and SDK/registry/registry.yaml, or ArgoCD will not deploy it`);
+  });
+
   test('/-/ping reports the package version', async () => {
     const reg = await startRegistry();
     try {
