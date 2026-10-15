@@ -38,6 +38,8 @@ these requirements, and the alternatives rejected, are in
 | [R23](#r23) | A filter must name its runtimes in "using", and at least one must be published on the registry | 2026-10-15 |
 | [R24](#r24) | Every combination proposed for a file shares a runtime; `list` shows the runtimes | 2026-10-15 |
 | [R25](#r25) | Every change to the registry comes with a new version, which is the image tag ArgoCD deploys | 2026-10-16 |
+| [R26](#r26) | `revert-page` brings a page back to its state before `update-page`, removing the files it added | 2026-10-16 |
+| [R27](#r27) | A build without the right emsdk offers to download it and sets up its environment; declining shows how to use one's own | 2026-10-16 |
 
 ---
 
@@ -314,4 +316,34 @@ tags the image with it, and `deploy/k8s/registry.yaml` and
 - Checked by: `registry.test.js` "a change to the registry comes with a new version" (git: no change
   under `src/`, `Dockerfile` or the lockfile since the commit that set the version, unless the version
   differs from it), "the image tag in deploy/k8s/registry.yaml is the package version", "/-/ping reports the package version"
+
+### R26
+**`bevara revert-page <page>` undoes `update-page --write`**: the page as it was
+before the first update-page, the files it added next to it removed, those it
+replaced (`--refresh`) restored. What changed since (a page edited by hand, a
+module rebuilt in place) is kept unless `--force`, and a file another page of
+the directory still loads is never removed. A page updated before records
+existed is reverted by removing its universal markup and the files it loads,
+after a confirmation.
+
+- Where: `cli/src/lib/page-record.js` (`.bevara/pages.json` beside the page), `cli/src/commands/revert-page.js`, `recordUpdate` in `update-page`
+- Checked by: `cli/test/page-record.test.js`; by hand, update-page then revert-page on the JXL page gives back the original bytes and an empty directory
+
+### R27
+**A build that lacks the Emscripten SDK it wants offers to download it, and
+sets up the environment itself.** The version wanted is the one the repository
+pins (`third_parties/emsdk_vers.txt`), the latest stable when it pins none. If
+the active SDK is that version, nothing happens; if the CLI's own emsdk
+(`~/.bevara/emsdk`, or `BEVARA_EMSDK_HOME`) has it, it is used without asking;
+otherwise the CLI offers to download it there (`-y` accepts) and runs the build
+with that SDK's environment - no `source emsdk_env.sh` by hand, the user's shell
+untouched. The user may decline: the CLI then shows the commands to use an
+emsdk they already have, builds with the active SDK if there is one (warning
+that it is not the pinned version), and stops otherwise. A custom
+`scripts.build` runs as is when there is no SDK.
+
+- Where: `cli/src/lib/emsdk-provision.js` (`ensureEmsdk`), called by `buildFilter` in `cli/src/lib/pack.js`
+  (`build`, `pack --build`, `publish --build`)
+- Checked by: `cli/test/emsdk-provision.test.js` (every branch, with stand-ins for the download); by hand,
+  a build with no SDK in the PATH and `BEVARA_EMSDK_HOME` set builds libjxl with its environment
 

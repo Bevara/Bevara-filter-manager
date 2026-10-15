@@ -17,6 +17,7 @@ export const COMMANDS = {
   'update-page': { alias: ['page'], desc: 'Rewrite an HTML page to use the universal tags for its media', usage: '<file.html...>', mod: './commands/update-page.js' },
   select: { alias: ['query'], desc: 'Select accessors by capability (what they accept), priority, size, licence', usage: '[query.json]', mod: './commands/select.js' },
   caps: { alias: ['capabilities'], desc: 'Show what the filters accept and produce, as published for selection', usage: '[dir]', mod: './commands/caps.js' },
+  'revert-page': { desc: 'Undo update-page: restore the page and remove the files it added', usage: '<file.html...>', mod: './commands/revert-page.js' },
   build: { desc: 'Build the filter (.wasm side module) with Emscripten', usage: '[dir]', mod: './commands/build.js' },
   test: { alias: ['check'], desc: 'Run a real pipeline on a file and report whether it decodes', usage: '<file...>', mod: './commands/test.js' },
   bench: { desc: 'Measure decoding performance of a pipeline', usage: '<file...>', mod: './commands/bench.js' },

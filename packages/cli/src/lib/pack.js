@@ -9,6 +9,7 @@ import { addFilterFor, executableFor } from './cmake.js';
 import { licenceFromRepository, LICENCE_FILES } from './license.js';
 import { extractCaps, projectsOf, runtimeBuiltins } from './caps.js';
 import { activeEmsdk, expectedEmsdk, resetIfOtherToolchain, diagnoseBuildFailure, sdkOf, emsdkOfBuild } from './emsdk.js';
+import { ensureEmsdk } from './emsdk-provision.js';
 import { CliError, log, color } from './ui.js';
 
 // Docs and licence files travel with the module: the licences require it.
@@ -159,7 +160,7 @@ export const defaultBuildCommand = (dir = DEFAULT_BUILD_DIR) => {
 
 /* A custom "scripts.build" receives the build directory as BEVARA_BUILD_DIR,
  * so it can honour --build-dir too. */
-export async function buildFilter(project, { script, buildDir } = {}) {
+export async function buildFilter(project, { script, buildDir, yes = false } = {}) {
   const m = project.manifest;
   const custom = script ?? m.scripts?.build;
   const dir = buildDir ?? DEFAULT_BUILD_DIR;
@@ -168,12 +169,18 @@ export async function buildFilter(project, { script, buildDir } = {}) {
     log.warn(`--build-dir only reaches a custom build command through $BEVARA_BUILD_DIR, which "${custom}" does not use`);
   }
 
-  // The SDK in use, and the one the repository pins (third_parties/emsdk_vers.txt).
-  const active = activeEmsdk();
-  const expected = expectedEmsdk(project.root);
-  if (active && expected && active.version && active.version !== expected.version) {
-    log.warn(`this repository expects emsdk ${expected.version} (${expected.file}), the active one is ${active.version} (${sdkOf(active.toolchain)}): source ${path.join(expected.sdk, 'emsdk_env.sh')}`);
+  // The SDK the repository pins (third_parties/emsdk_vers.txt): the active one
+  // if it is that one, else offered for download (emsdk-provision.js).
+  // A custom build command may bring its own toolchain: without an SDK it runs as is.
+  let sdk;
+  try { sdk = await ensureEmsdk(project.root, { yes }); }
+  catch (e) {
+    if (!custom || !(e instanceof CliError)) throw e;
+    log.warn(`no Emscripten SDK: running "${custom}" as it is`);
+    sdk = { env: process.env, version: null, source: 'none' };
   }
+  const active = activeEmsdk(sdk.env);
+  const expected = expectedEmsdk(project.root);
   if (!custom) {
     warnIfTracked(project.root, dir);
     // A build directory configured by another SDK keeps loading that SDK's toolchain.
@@ -186,7 +193,7 @@ export async function buildFilter(project, { script, buildDir } = {}) {
   const tail = [];
   const keep = (chunk) => { tail.push(String(chunk)); if (tail.length > 400) tail.splice(0, tail.length - 400); };
   const code = await new Promise((resolve) => {
-    const child = spawn(cmd, { cwd: project.root, shell: true, env: { ...process.env, BEVARA_BUILD_DIR: dir }, stdio: ['inherit', 'pipe', 'pipe'] });
+    const child = spawn(cmd, { cwd: project.root, shell: true, env: { ...sdk.env, BEVARA_BUILD_DIR: dir }, stdio: ['inherit', 'pipe', 'pipe'] });
     child.stdout.on('data', (d) => { process.stdout.write(d); keep(d); });
     child.stderr.on('data', (d) => { process.stderr.write(d); keep(d); });
     child.on('error', () => resolve(127));

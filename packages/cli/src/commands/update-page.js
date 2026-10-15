@@ -10,6 +10,7 @@ import { needsOf, videoTailNeeds, resolvePipeline, pageSolver, describeNeed } fr
 import { mediaTracks, closeMediaInfo } from '../lib/mediainfo.js';
 import { extensionOf } from '../lib/formats.js';
 import { pageRequirements, locateSources, deployFiles } from '../lib/page-files.js';
+import { recordUpdate, backupBeforeReplace } from '../lib/page-record.js';
 
 export const options = {
   write: { type: 'boolean', short: 'w' },
@@ -51,6 +52,7 @@ built by hand), unless --refresh.
   bevara update-page index.html --write --runtime ../player/build   scripts and solvers from a local build
   bevara update-page index.html --write --install     also record the accessors in bevara.json
   bevara update-page index.html --attrs "progressive use-worker"
+  bevara revert-page index.html                       undo it: the page as it was, the files removed
 
 Options:
   -w, --write        apply the changes (default: show the diff only)
@@ -214,6 +216,7 @@ export async function run({ args, opts }) {
     report.changed = edits.length > 0;
     report.updated = report.changed ? applyEdits(html, edits) : html;
     report.dir = dir;
+    report.original = html;
     report.preview = report.changed ? previewEdits(html, edits) : [];
     reports.push(report);
 
@@ -227,12 +230,19 @@ export async function run({ args, opts }) {
     for (const r of reports) {
       const reqs = pageRequirements(r.updated, r.dir);
       if (!reqs.length) continue;
-      r.files = await deployFiles(locateSources(reqs, { index, runtimeDirs }), { client, refresh: opts.refresh, dryRun: !opts.write });
+      r.files = await deployFiles(locateSources(reqs, { index, runtimeDirs }), { client, refresh: opts.refresh, dryRun: !opts.write, onReplace: (dest) => backupBeforeReplace(r.dir, dest) });
+    }
+  }
+  // What was written, for revert-page.
+  if (opts.write) {
+    for (const r of reports) {
+      const touched = r.changed || (r.files ?? []).some((f) => f.status === 'added' || f.status === 'replaced');
+      if (touched) recordUpdate(r.file, r.original, r.updated, r.files ?? []);
     }
   }
 
   if (opts.json) {
-    console.log(JSON.stringify(reports.map(({ updated, preview, dir, ...r }) => r), null, 2));
+    console.log(JSON.stringify(reports.map(({ updated, preview, dir, original, ...r }) => r), null, 2));
     return;
   }
 

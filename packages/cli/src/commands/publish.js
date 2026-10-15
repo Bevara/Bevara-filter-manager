@@ -62,7 +62,7 @@ export async function run({ args, opts }) {
       } else if (missing.length) log.warn(`"using" names ${missing.join(', ')}, not published on ${registry}: pages using ${missing.length > 1 ? 'them' : 'it'} cannot load this accessor from there`);
     }
   }
-  if (opts.build) await buildFilter(project, { buildDir });
+  if (opts.build) await buildFilter(project, { buildDir, yes: opts.yes });
   const r = await packFilter(project, { buildDir });
   const m = r.manifest;
   console.log(`${color.bold(m.name)}@${color.green(m.version)} → ${color.dim(registry)}  ${color.dim(`(${path.relative(process.cwd(), project.manifestFile) || project.manifestName})`)}`);

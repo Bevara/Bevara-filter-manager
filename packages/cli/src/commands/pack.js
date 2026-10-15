@@ -19,7 +19,7 @@ export async function run({ args, opts }) {
   if (args.length > 1) throw new CliError('pack takes one directory at most');
   const project = Project.load({ dir: args[0] });
   const buildDir = opts['build-dir'];
-  if (opts.build) await buildFilter(project, { buildDir });
+  if (opts.build) await buildFilter(project, { buildDir, yes: opts.yes });
   const r = await packFilter(project, { dryRun: opts['dry-run'], buildDir });
   console.log(table(r.entries.map((e) => [color.dim(e.path), formatBytes(e.size)])));
   if (opts['dry-run']) return log.ok(`${r.manifest.name}@${r.manifest.version}: ${r.entries.length} files from ${project.manifestName} (dry run)`);

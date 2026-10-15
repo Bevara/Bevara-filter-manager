@@ -91,7 +91,7 @@ export function locateSources(reqs, { index, runtimeDirs = [] }) {
  * hand-built module next to a page is not overwritten silently.
  * @returns the requirements with `status`: present | added | replaced | kept | failed | missing
  */
-export async function deployFiles(located, { client, refresh = false, dryRun = false }) {
+export async function deployFiles(located, { client, refresh = false, dryRun = false, onReplace = null }) {
   const results = [];
   for (const r of located) {
     if (r.missing) { results.push({ ...r, status: 'missing' }); continue; }
@@ -106,6 +106,7 @@ export async function deployFiles(located, { client, refresh = false, dryRun = f
       if (existing && existing.equals(data)) { results.push({ ...r, status: 'present' }); continue; }
       if (existing && !refresh) { results.push({ ...r, status: 'kept' }); continue; }
       if (!dryRun) {
+        if (existing && onReplace) onReplace(r.dest);      // revert-page restores it
         fs.mkdirSync(path.dirname(r.dest), { recursive: true });
         fs.writeFileSync(r.dest, data);
       }

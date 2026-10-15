@@ -23,7 +23,7 @@ export async function run({ args, opts }) {
   const buildDir = opts['build-dir'];
   if (!project.isFilter) throw new CliError(`${project.manifestName} does not describe a filter (no "filters") nor a runtime ("kind": "runtime")`);
   const m = filterManifest(project, { buildDir });
-  await buildFilter(project, { script: opts.script, buildDir });
+  await buildFilter(project, { script: opts.script, buildDir, yes: opts.yes });
   const { info } = checkArtifact(project, m);
   log.ok(`built ${color.bold(m.main)} (${formatBytes(info.size)}, ${info.exports.length} exports, needs: ${info.dylink?.needed.join(', ') || 'none'})`);
 }

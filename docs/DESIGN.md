@@ -447,6 +447,20 @@ element with an absolute `script-directory` needs nothing copied.
 - `--install` remains the site-project workflow (bevara.json, lockfile,
   signature checks); `--no-files` rewrites the HTML only.
 
+**D9.5 — update-page keeps what revert-page needs.**
+`--write` records, in `.bevara/pages.json` beside the page, the page before the
+first run (`.bevara/pages/<page>.orig`), the sha256 of what it last wrote, and
+each file it added or replaced with the sha256 of what it wrote; a replaced
+file is copied to `.bevara/pages/backup/` first. Later runs keep the first
+original: revert goes back to the page before update-page ever touched it.
+- *Why*: a revert must remove what update-page added and nothing else; hashes
+  tell an untouched file from one rebuilt or edited since, and the record
+  makes the operation exact instead of guessed.
+- *Rejected*: deriving the revert from the page alone (strip the markup,
+  delete what it loads) as the general method - it cannot restore a replaced
+  file nor tell a module someone built by hand. It remains the fallback for
+  pages updated before records existed, behind a confirmation.
+
 **D9.3 — It refuses what would be wrong rather than guessing.**
 A `customized built-in` must match the element it extends: an `<img>` pointing at
 a video is reported, not given `is="universal-video_1"` (`<canvas>` accepts both).
