@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { log, color, table, formatBytes, CliError } from '../lib/ui.js';
-import { Project } from '../lib/ctx.js';
+import { Project, clientFor } from '../lib/ctx.js';
+import { registryCombinations, fetchModules } from '../lib/run-prep.js';
+import { closeMediaInfo } from '../lib/mediainfo.js';
 import { sniff, CONTAINER_MODULES } from '../lib/sniff.js';
 import { VIDEO_TAIL } from '../lib/formats.js';
 import { readLocal } from '../lib/source.js';
@@ -23,15 +25,17 @@ resolves the filter graph from the file's capabilities, and the result says
 which filters connected, how many packets each one processed, and what came
 out. A graph that resolves but decodes nothing is a failure, not a pass.
 
-  bevara test clip.ogv                       accessors chosen by probing the file
+  bevara test clip.ogv                       accessors chosen on the registry for the file
   bevara test clip.ogv -W "ogg_1;theora_1"   test one explicit combination
   bevara test clip.mp4 -W "isobmff_1;h264bsd_1" -W "isobmff_1;ffmpeg-h26x_1"
   bevara test samples/*                      a whole corpus, one line per file
 
 Options:
   -W, --with "a_1;b_1"   filter combination to test; repeat to test several
-  -a, --accessors <dir>  where the .wasm accessors and the solver live
-                         (default: the project's accessors directory)
+  -a, --accessors <dir>  run with the modules of this directory instead
+                         (default: nothing to install - the file is identified,
+                         its accessors and a runtime they share are chosen on
+                         the registry and cached in ~/.bevara/cache)
       --expect <filter>  require this GPAC filter in the resolved graph (repeatable)
       --timeout <s>      give up on a session after this long (default 120)
   -s, --solver <name>    solver_1 (default, reports statistics) or solver_minimal_1
@@ -74,17 +78,29 @@ export async function runCase(file, modules, info, dir, opts) {
 export async function run({ args, opts }) {
   if (!args.length) throw new CliError('usage: bevara test <file...>');
   const project = Project.load({ required: false });
-  const dir = accessorsDirFor(opts, project);
+  const local = opts.accessors ? accessorsDirFor(opts, project) : null;
+  const { registry, client } = clientFor(opts, project);
+  const index = local ? null : await client.get('/accessors/index.json', { auth: false });
   const { verdict } = await import('../lib/runner.js');
   const reports = [];
 
   for (const file of args) {
     if (!fs.existsSync(file)) { log.error(`${file}: not found`); process.exitCode = 1; continue; }
     const info = await probeFile(file);
-    const combinations = opts.with?.length
-      ? opts.with.map((w) => w.split(/[;,\s]+/).filter(Boolean))
-      : [info.decodeWith];
-    if (!combinations[0]?.length) { log.error(`${file}: no pipeline to test (format not identified)`); process.exitCode = 1; continue; }
+    let combinations, dir = local;
+    try {
+      if (local) {
+        combinations = opts.with?.length ? opts.with.map((w) => w.split(/[;,\s]+/).filter(Boolean)) : [info.decodeWith];
+        if (!combinations[0]?.length) throw new CliError('no pipeline to test (format not identified)');
+      } else {
+        combinations = await registryCombinations(file, index, opts);
+        dir = await fetchModules(combinations, index, { client, registry, solver: opts.solver });
+      }
+    } catch (e) {
+      if (!(e instanceof CliError)) throw e;
+      log.error(`${file}: ${e.message}`); if (e.hint) console.log(color.dim(`  ${e.hint}`));
+      process.exitCode = 1; continue;
+    }
 
     for (const modules of combinations) {
       const c = await runCase(file, modules, info, dir, opts);
@@ -95,6 +111,7 @@ export async function run({ args, opts }) {
     }
   }
 
+  await closeMediaInfo();
   if (opts.json) {
     console.log(JSON.stringify(reports.map((r) => ({
       file: r.file, format: r.format, modules: r.modules, missing: r.missing,

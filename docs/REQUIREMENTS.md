@@ -20,7 +20,7 @@ these requirements, and the alternatives rejected, are in
 | [R5](#r5) | The CLI is published publicly on npm | 2026-10-05 |
 | [R6](#r6) | `probe` identifies a file and the accessors it needs | 2026-10-05 |
 | [R7](#r7) | `update-page` converts a page to the universal tags | 2026-10-06 |
-| [R8](#r8) | `test` checks a filter combination, `bench` measures it | 2026-10-06 |
+| [R8](#r8) | `test` checks a filter combination, `bench` measures it - with nothing to install | 2026-10-06, 2026-10-16 |
 | [R9](#r9) | The CLI can be run and debugged in VS Code | 2026-10-06 |
 | [R10](#r10) | Error messages are explicit | 2026-10-06 |
 | [R11](#r11) | The default registry is registry.bevara.ddns.net | 2026-10-06 |
@@ -107,10 +107,19 @@ the pipeline from the file each `src` points to:
 ### R8
 **`bevara test` checks whether a filter combination works on a file, and
 `bevara bench` measures its decoding performance**, by running the real
-pipeline (solver + accessors as side modules), not a simulation.
+pipeline (solver + accessors as side modules), not a simulation. A pass is a
+run that produces output without error.
 
-- Where: `cli/src/lib/run-session.cjs`, `runner.js`, `commands/{test,bench}.js`
-- Checked by: `cli/test/runner.test.js`, including two real-pipeline tests that run when the solver is available
+**Nothing needs installing** (2026-10-16): without `--accessors`, the file is
+identified with MediaInfo, the accessors that decode it and a runtime they
+share are chosen among what the registry publishes (as `probe` does; `-W`
+names a combination instead), and the modules are downloaded, checked against
+their integrity, into `~/.bevara/cache/<registry host>/` (or `BEVARA_CACHE`),
+kept between runs. `--accessors <dir>` still runs with a local directory.
+
+- Where: `cli/src/lib/run-session.cjs`, `runner.js`, `run-prep.js`, `commands/{test,bench}.js`
+- Checked by: `cli/test/runner.test.js` (two real-pipeline tests when the solver is available), `cli/test/run-prep.test.js`;
+  by hand, `bevara test` and `bevara bench` on a FLAC file and a JPEG XL image with an empty cache
 
 ### R9
 **The CLI can be run and debugged in VS Code**, including the child processes

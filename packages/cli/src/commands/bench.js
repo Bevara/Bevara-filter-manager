@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { log, color, table, formatBytes, CliError } from '../lib/ui.js';
-import { Project } from '../lib/ctx.js';
+import { Project, clientFor } from '../lib/ctx.js';
+import { registryCombinations, fetchModules } from '../lib/run-prep.js';
+import { closeMediaInfo } from '../lib/mediainfo.js';
 import { runSession, requireSolver, missingModules, verdict, median, solverForCombination } from '../lib/runner.js';
 import { accessorsDirFor, probeFile } from './test.js';
 
@@ -31,7 +33,9 @@ Options:
   -W, --with "a_1;b_1"   combination to measure; repeat to compare several
   -n, --runs <n>         measured runs per combination (default 3, median reported)
       --warmup <n>       unmeasured runs first (default 1)
-  -a, --accessors <dir>  where the accessors and the solver live
+  -a, --accessors <dir>  run with the modules of this directory instead (default:
+                         nothing to install - chosen on the registry and cached
+                         in ~/.bevara/cache)
   -s, --solver <name>    solver_1 (default) or solver_minimal_1
       --timeout <s>      give up on a session after this long (default 120)
       --json             machine-readable results`;
@@ -42,7 +46,9 @@ const PLUMBING = /^(fin|fout|writegen|writeuf|reframer|resample|httpin|dasher)\b
 export async function run({ args, opts }) {
   if (!args.length) throw new CliError('usage: bevara bench <file...>');
   const project = Project.load({ required: false });
-  const dir = accessorsDirFor(opts, project);
+  const local = opts.accessors ? accessorsDirFor(opts, project) : null;
+  const { registry, client } = clientFor(opts, project);
+  const index = local ? null : await client.get('/accessors/index.json', { auth: false });
   const runs = Math.max(1, parseInt(opts.runs ?? '3', 10) || 3);
   const warmup = Math.max(0, parseInt(opts.warmup ?? '1', 10) || 0);
   const timeoutMs = (parseInt(opts.timeout ?? '120', 10) || 120) * 1000;
@@ -51,10 +57,20 @@ export async function run({ args, opts }) {
   for (const file of args) {
     if (!fs.existsSync(file)) { log.error(`${file}: not found`); process.exitCode = 1; continue; }
     const info = await probeFile(file);
-    const combinations = opts.with?.length
-      ? opts.with.map((w) => w.split(/[;,\s]+/).filter(Boolean))
-      : [info.decodeWith];
-    if (!combinations[0]?.length) { log.error(`${file}: format not identified, nothing to measure`); process.exitCode = 1; continue; }
+    let combinations, dir = local;
+    try {
+      if (local) {
+        combinations = opts.with?.length ? opts.with.map((w) => w.split(/[;,\s]+/).filter(Boolean)) : [info.decodeWith];
+        if (!combinations[0]?.length) throw new CliError('format not identified, nothing to measure');
+      } else {
+        combinations = await registryCombinations(file, index, opts);
+        dir = await fetchModules(combinations, index, { client, registry, solver: opts.solver });
+      }
+    } catch (e) {
+      if (!(e instanceof CliError)) throw e;
+      log.error(`${file}: ${e.message}`); if (e.hint) console.log(color.dim(`  ${e.hint}`));
+      process.exitCode = 1; continue;
+    }
     const size = fs.statSync(file).size;
     if (!opts.json) console.log(`${color.bold(path.basename(file))} ${color.dim(`${info.format ?? '?'} · ${formatBytes(size)} · ${runs} run${runs === 1 ? '' : 's'}`)}`);
 
@@ -133,5 +149,6 @@ export async function run({ args, opts }) {
     }
   }
 
+  await closeMediaInfo();
   if (opts.json) console.log(JSON.stringify(results, null, 2));
 }
