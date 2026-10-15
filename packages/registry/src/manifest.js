@@ -76,6 +76,7 @@ export function validateManifest(m, { forPublish = false } = {}) {
   if (m.priority !== undefined && !(Number.isInteger(m.priority) && m.priority >= 0 && m.priority <= 255)) errors.push('"priority" must be an integer in [0, 255] (lower = preferred)');
   if (m.projects !== undefined && !isStrArray(m.projects)) errors.push('"projects" must list the upstream projects the module is built from (["ffmpeg"])');
   if (m.project !== undefined && !isStr(m.project)) errors.push('"project" must be a string');
+  if (m.emsdk !== undefined && !(isStr(m.emsdk) && /^\d+\.\d+\.\d+$/.test(m.emsdk))) errors.push('"emsdk" is the Emscripten version the module was built with, e.g. "6.0.8" (derived from the build at publish)');
   if (m.language !== undefined && !['wasm', 'js'].includes(m.language)) errors.push('"language" must be "wasm" or "js"');
   if (m.runtime !== undefined) {
     if (!m.runtime || typeof m.runtime !== 'object' || Array.isArray(m.runtime)) errors.push('"runtime" must map GPAC filter names to {outputs: [{property, format}]}');
@@ -146,7 +147,7 @@ export function normalizeManifest(m) {
 }
 
 // Fields that are meaningful once published (everything a consumer needs).
-export const PUBLIC_FIELDS = ['name', 'version', 'abi', 'kind', 'builtins', 'module', 'description', 'filters', 'support', 'formats', 'extension', 'using', 'keywords', 'license', 'licence_required', 'georestrictions', 'priority', 'caps', 'projects', 'language', 'inputs', 'outputs', 'sources', 'homepage', 'filter_source', 'dependencies', 'help', 'author'];
+export const PUBLIC_FIELDS = ['name', 'version', 'abi', 'kind', 'builtins', 'emsdk', 'module', 'description', 'filters', 'support', 'formats', 'extension', 'using', 'keywords', 'license', 'licence_required', 'georestrictions', 'priority', 'caps', 'projects', 'language', 'inputs', 'outputs', 'sources', 'homepage', 'filter_source', 'dependencies', 'help', 'author'];
 
 export function publicManifest(m) {
   const out = {};

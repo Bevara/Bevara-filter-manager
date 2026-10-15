@@ -138,6 +138,10 @@ The generation comes from `add_executable(<name>_${VERSION})` and
 GPAC filters it registers itself) from `loader.js`. The package carries
 `<name>_<N>.wasm` and `<name>_<N>.js`. A runtime has no `"using"`.
 
+`emsdk` (the Emscripten version, e.g. `"6.0.8"`) is derived at publish from
+the CMake configuration of the build directory; it is never written in
+`<name>.json`.
+
 `name` and `filters` (or `"kind": "runtime"`) are required to publish, and a
 filter needs `"using"`: the runtimes it links against, at least one of them
 published on the registry. The compiled artifact must be a valid

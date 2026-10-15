@@ -286,13 +286,20 @@ registry lacks, or a registry with no runtime at all, are reported as such
 (not as a conflict), and an accessor without `"using"` is flagged. `test` and
 `bench` refuse a combination (automatic or `-W`) whose installed accessors
 share no runtime, and run it with one they share (`--solver` must be one).
-`bevara list` shows each filter's runtimes - in red when the registry does not
-publish them - and the published runtimes with their built-in filters; in a
-site, each installed filter's runtimes and the `using="…"` they all share.
+`bevara list` lists the filters only, with their runtimes - in red when the
+registry does not publish them - and in a site the `using="…"` they all share;
+`bevara runtimes` lists the runtimes: the `using=` name, the built-in filters
+and how many filters link against each. Both show the Emscripten version each
+module was built with (`emsdk`): `publish` reads it from the CMake
+configuration of the directory the module was built in (the `.wasm` does not
+record it), publishes it, and warns when it differs from the repository's
+`third_parties/emsdk_vers.txt`.
 
 - Where: `resolvePipeline`, `solverOrder`, `commonRuntimes` in `cli/src/lib/capabilities.js`;
-  `solverForCombination` in `cli/src/lib/runner.js`; `cli/src/commands/list.js`
-- Checked by: `cli/test/capabilities.test.js` "a combination shares a runtime"
+  `solverForCombination` in `cli/src/lib/runner.js`; `cli/src/commands/list.js` (`run`, `runtimes`);
+  `emsdkOfBuild` in `cli/src/lib/emsdk.js`, derived in `packFilter`
+- Checked by: `cli/test/capabilities.test.js` "a combination shares a runtime", `cli/test/emsdk.test.js`
+  "the Emscripten version a module was built with…"
 
 ### R25
 **Any change to the registry bumps its version.** ArgoCD deploys the registry

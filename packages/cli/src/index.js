@@ -10,6 +10,7 @@ export const COMMANDS = {
   outdated: { desc: 'Show filters with newer versions on the registry', mod: './commands/outdated.js' },
   audit: { desc: 'Check installed filters: integrity, advisories, deprecations, licences', mod: './commands/audit.js' },
   list: { alias: ['ls'], desc: 'List filters (installed in the project, or on the registry with --remote)', mod: './commands/list.js' },
+  runtimes: { alias: ['runtime'], desc: 'List runtimes (solvers): using= name, emsdk, built-in filters, filters using them', mod: './commands/list.js', fn: 'runtimes' },
   search: { alias: ['find'], desc: 'Search filters on the registry', usage: '<query>', mod: './commands/search.js' },
   info: { alias: ['view', 'show'], desc: 'Show details about a filter', usage: '<filter[@version]>', mod: './commands/info.js' },
   probe: { alias: ['identify'], desc: 'Identify a media file and the accessors needed to play it', usage: '<file|url...>', mod: './commands/probe.js' },

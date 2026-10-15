@@ -72,6 +72,8 @@ export async function run({ args, opts }) {
   if (m.derived?.caps) console.log(color.dim(`  capabilities of ${m.caps.map((c) => `${c.filter} (priority ${c.priority})`).join(', ')}, from ${m.derived.caps}`));
   if (m.derived?.projects) console.log(color.dim(`  projects ${m.projects.join(', ')}, from ${m.derived.projects}`));
   if (m.derived?.builtins) console.log(color.dim(`  runtime with built-in filters ${m.builtins.join(', ')}, from ${m.derived.builtins}`));
+  if (m.emsdk) console.log(color.dim(`  built with emsdk ${m.emsdk}, from ${m.derived?.emsdk ?? '"emsdk" in the manifest'}`));
+  else log.warn('the Emscripten version of this build is unknown (no CMake configuration next to the module): it is published without "emsdk"');
   console.log(table(r.entries.map((e) => [color.dim(e.path), formatBytes(e.size)]), { indent: '  ' }));
   console.log(`  ${color.dim('tarball')} ${formatBytes(r.size)}`);
   try {

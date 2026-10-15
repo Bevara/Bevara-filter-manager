@@ -8,7 +8,7 @@ import { validateManifest, normalizeManifest, fromLegacy, shortName } from './ma
 import { addFilterFor, executableFor } from './cmake.js';
 import { licenceFromRepository, LICENCE_FILES } from './license.js';
 import { extractCaps, projectsOf, runtimeBuiltins } from './caps.js';
-import { activeEmsdk, expectedEmsdk, resetIfOtherToolchain, diagnoseBuildFailure, sdkOf } from './emsdk.js';
+import { activeEmsdk, expectedEmsdk, resetIfOtherToolchain, diagnoseBuildFailure, sdkOf, emsdkOfBuild } from './emsdk.js';
 import { CliError, log, color } from './ui.js';
 
 // Docs and licence files travel with the module: the licences require it.
@@ -144,6 +144,7 @@ export function checkFilterManifest(project, { buildDir } = {}) {
   const file = project.manifestName;
   const m = filterManifest(project, { buildDir });
   for (const note of m.derived.notes) log.warn(note);
+  m.derived.notesShown = m.derived.notes.length;      // packFilter shows the ones it adds
   const { errors, warnings } = validateManifest(m, { forPublish: true });
   if (errors.length) throw new CliError(`${file} is invalid:\n  - ${errors.join('\n  - ')}`);
   for (const w of warnings) log.warn(`${file}: ${w}`);
@@ -229,7 +230,17 @@ export function checkArtifact(project, m) {
 //   package/bevara.json, package/<name>_<abi>.wasm, docs and "files" entries.
 export async function packFilter(project, { outDir = project.root, dryRun = false, buildDir } = {}) {
   const m = checkFilterManifest(project, { buildDir });
-  const { buf, js } = checkArtifact(project, m);
+  const { buf, js, file } = checkArtifact(project, m);
+  // The SDK it was built with, from the build directory it was found in.
+  if (m.emsdk === undefined) {
+    const built = emsdkOfBuild(path.dirname(file));
+    if (built) {
+      m.emsdk = built.version;
+      m.derived.emsdk = `the CMake configuration of ${path.relative(project.root, path.dirname(file)) || '.'}`;
+      const expected = expectedEmsdk(project.root);
+      if (expected && expected.version !== built.version) m.derived.notes.push(`built with emsdk ${built.version}, but the repository pins ${expected.version} (${expected.file})`);
+    }
+  }
   const stageRoot = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'bevara-pack-'));
   const stage = path.join(stageRoot, 'package');
   fs.mkdirSync(stage);
@@ -239,6 +250,7 @@ export async function packFilter(project, { outDir = project.root, dryRun = fals
   // Build-time keys and legacy aliases stay out of the published manifest.
   // "runtime" is folded into "caps"; "project" into "projects".
   const { main, mainDefaulted, mainCandidates, derived, scripts, accessorsDir, registry, Format, runtime, project: _project, ...published } = m;
+  for (const n of derived.notes.slice(derived.notesShown ?? 0)) log.warn(n);
   add('bevara.json', Buffer.from(JSON.stringify(published, null, 2) + '\n'));
   add(accessorFileName(m.name, m.abi, m.module), buf);
   if (js) add(accessorFileName(m.name, m.abi, m.module).replace(/\.wasm$/, '.js'), js);

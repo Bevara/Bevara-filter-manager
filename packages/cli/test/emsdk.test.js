@@ -105,3 +105,19 @@ describe('build failures', () => {
     assert.equal(diagnoseBuildFailure("dec_jxl.c:12:3: error: use of undeclared identifier 'x'", { active: { version: '6.0.8' }, expected }), null);
   });
 });
+
+test('the Emscripten version a module was built with comes from its build directory', async () => {
+  const { emsdkOfBuild } = await import('../src/lib/emsdk.js');
+  const fsm = await import('node:fs'); const osm = await import('node:os'); const pathm = await import('node:path');
+  const root = fsm.mkdtempSync(pathm.join(osm.tmpdir(), 'bevara-emsdk-'));
+  const em = pathm.join(root, 'emsdk', 'upstream', 'emscripten');
+  fsm.mkdirSync(pathm.join(em, 'cmake', 'Modules', 'Platform'), { recursive: true });
+  fsm.writeFileSync(pathm.join(em, 'cmake', 'Modules', 'Platform', 'Emscripten.cmake'), '');
+  fsm.writeFileSync(pathm.join(em, 'emscripten-version.txt'), '"6.0.8"\n');
+  const build = pathm.join(root, 'build');
+  fsm.mkdirSync(build);
+  assert.equal(emsdkOfBuild(build), null);                       // not configured
+  fsm.writeFileSync(pathm.join(build, 'CMakeCache.txt'), `CMAKE_TOOLCHAIN_FILE:FILEPATH=${pathm.join(em, 'cmake', 'Modules', 'Platform', 'Emscripten.cmake')}\n`);
+  assert.equal(emsdkOfBuild(build).version, '6.0.8');
+  fsm.rmSync(root, { recursive: true, force: true });
+});

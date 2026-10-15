@@ -67,6 +67,20 @@ export function resetIfOtherToolchain(buildDir, toolchain) {
   return { from: sdkOf(before), to: sdkOf(toolchain) };
 }
 
+/* The Emscripten version a module was built with: its build directory's
+ * CMake configuration names the toolchain, whose emscripten-version.txt says
+ * it. The .wasm itself does not record it (no "producers" section). */
+export function emsdkOfBuild(buildDir) {
+  const toolchain = configuredToolchain(buildDir);
+  if (!toolchain) return null;
+  const root = toolchain.replace(/\/cmake\/Modules\/Platform\/Emscripten\.cmake$/, '');
+  try {
+    const v = /(\d+\.\d+\.\d+)/.exec(fs.readFileSync(path.join(root, 'emscripten-version.txt'), 'utf8'))?.[1];
+    if (v) return { version: v, sdk: sdkOf(toolchain) };
+  } catch { /* an SDK without the file */ }
+  return null;
+}
+
 // .../emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -> .../emsdk
 export const sdkOf = (toolchain) => toolchain.replace(/\/upstream\/emscripten\/cmake\/Modules\/Platform\/Emscripten\.cmake$/, '');
 

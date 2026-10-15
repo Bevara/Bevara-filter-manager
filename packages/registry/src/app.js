@@ -330,7 +330,7 @@ export function createApp(config = {}) {
       const m = r.manifest ? JSON.parse(r.manifest) : {};
       return {
         name: r.name, namespace: splitName(r.name).namespace, latest: r.latest, description: r.description, deprecated: r.deprecated,
-        kind: m.kind ?? 'filter', using: m.using, builtins: m.builtins, abi: r.abi, file: r.wasm_file, size: r.wasm_size, brSize: r.wasm_br_size,
+        kind: m.kind ?? 'filter', using: m.using, builtins: m.builtins, emsdk: m.emsdk, abi: r.abi, file: r.wasm_file, size: r.wasm_size, brSize: r.wasm_br_size,
         filters: m.filters ?? [], support: m.support ?? [], formats: m.formats ?? [], keywords: m.keywords ?? [],
         license: m.license, licence_required: !!m.licence_required, priority: m.priority,
         downloads: q.downloads.get(r.name).n, updated: r.updated_at,
@@ -395,7 +395,7 @@ export function createApp(config = {}) {
     return latestRows().filter(isRuntime).map((r) => {
       const m = JSON.parse(r.manifest); const js = jsOf(r); const info = r.wasm_info ? JSON.parse(r.wasm_info) : {};
       const at = (f) => `${base}/accessors/${encodeURIComponent(r.name)}/${r.version}/${f}`;
-      return { name: r.name, version: r.version, abi: r.abi, module: r.wasm_file.replace(/\.wasm$/, ''), description: m.description, builtins: m.builtins, license: m.license, projects: m.projects,
+      return { name: r.name, version: r.version, abi: r.abi, module: r.wasm_file.replace(/\.wasm$/, ''), description: m.description, builtins: m.builtins, emsdk: m.emsdk, license: m.license, projects: m.projects,
         file: r.wasm_file, url: at(r.wasm_file), integrity: 'sha256-' + b64(r.wasm_sha256), size: r.wasm_size, brSize: r.wasm_br_size,
         js: js?.file, jsUrl: js && at(js.file), jsIntegrity: js && 'sha256-' + b64(js.sha256), jsSize: js?.size, keyId: info.signature?.keyId, logSeq: info.signature?.logSeq };
     });
@@ -403,7 +403,7 @@ export function createApp(config = {}) {
   const indexEntries = (req) => {
     const base = baseUrl(req);
     return latestRows().filter((r) => !isRuntime(r))
-      .map((r) => { const m = JSON.parse(r.manifest); const info = r.wasm_info ? JSON.parse(r.wasm_info) : {}; return { name: r.name, version: r.version, abi: r.abi, file: r.wasm_file, url: `${base}/accessors/${encodeURIComponent(r.name)}/${r.version}/${r.wasm_file}`, filters: m.filters, support: m.support, formats: m.formats, extension: m.extension, using: m.using, inputs: m.inputs, outputs: m.outputs, priority: m.priority, caps: m.caps, projects: m.projects, language: m.language ?? 'wasm', license: m.license, licence_required: !!m.licence_required, georestrictions: m.georestrictions, dependencies: m.dependencies, size: r.wasm_size, brSize: r.wasm_br_size, integrity: 'sha256-' + b64(r.wasm_sha256), keyId: info.signature?.keyId, logSeq: info.signature?.logSeq }; });
+      .map((r) => { const m = JSON.parse(r.manifest); const info = r.wasm_info ? JSON.parse(r.wasm_info) : {}; return { name: r.name, version: r.version, abi: r.abi, file: r.wasm_file, url: `${base}/accessors/${encodeURIComponent(r.name)}/${r.version}/${r.wasm_file}`, filters: m.filters, support: m.support, formats: m.formats, extension: m.extension, using: m.using, inputs: m.inputs, outputs: m.outputs, priority: m.priority, caps: m.caps, projects: m.projects, language: m.language ?? 'wasm', emsdk: m.emsdk, license: m.license, licence_required: !!m.licence_required, georestrictions: m.georestrictions, dependencies: m.dependencies, size: r.wasm_size, brSize: r.wasm_br_size, integrity: 'sha256-' + b64(r.wasm_sha256), keyId: info.signature?.keyId, logSeq: info.signature?.logSeq }; });
   };
 
   router.get('/accessors/index.json', (req, res) => {
