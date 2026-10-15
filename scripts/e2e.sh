@@ -66,8 +66,9 @@ mkdir -p build && cp "$FIXTURE" build/second_1.wasm
 node -e "const f='second.json',m=JSON.parse(require('fs').readFileSync(f));m.dependencies={dummy:'^1.0.0'};require('fs').writeFileSync(f,JSON.stringify(m,null,2))"
 $BEVARA publish -y
 
-step "catalog: list --remote / search / info"
-$BEVARA list --remote | grep -q dummy
+step "catalog: filters --remote / runtimes --remote / search / info"
+$BEVARA filters --remote | grep -q dummy
+$BEVARA runtimes --remote | grep -q 'solver_1'
 $BEVARA search second | grep -q second
 $BEVARA info second | grep -q 'dummy@^1.0.0'
 $BEVARA info second | grep -q 'log #'
@@ -81,7 +82,7 @@ check test -f accessors/dummy_1.wasm
 check test -f bevara-lock.json
 check test -f accessors/dummy.json
 grep -q '"bevara:second": "\^1.0.0"' bevara.json
-$BEVARA list | grep -q 'with="'
+$BEVARA filters | grep -q 'with="'
 $BEVARA install                     # idempotent
 $BEVARA audit
 check grep -q '"log"' bevara-lock.json
@@ -269,7 +270,7 @@ mkdir -p build && cp "$FIXTURE" build/mine_1.wasm
 node -e "const f='mine.json',m=JSON.parse(require('fs').readFileSync(f));m.name='bob:mine';require('fs').writeFileSync(f,JSON.stringify(m,null,2))"
 $BEVARA publish -y | grep 'bob:mine@1.0.0' >/dev/null
 $BEVARA namespace ls | grep -q bob
-$BEVARA list --remote | grep -q 'bob:mine'
+$BEVARA filters --remote | grep -q 'bob:mine'
 cd "$WORK/site"
 $BEVARA install bob:mine
 check test -f accessors/mine_1.wasm

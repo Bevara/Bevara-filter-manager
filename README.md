@@ -26,7 +26,7 @@ The CLI talks to **https://registry.bevara.ddns.net** out of the box. To use
 another registry, for one command or for good:
 
 ```bash
-bevara list -r http://127.0.0.1:8080          # one command (a bare host works too)
+bevara filters -r http://127.0.0.1:8080          # one command (a bare host works too)
 bevara config set registry http://127.0.0.1:8080
 bevara config get registry                    # the registry in use, and where that comes from
 bevara config unset registry                  # back to registry.bevara.ddns.net
@@ -158,7 +158,7 @@ decodes, `--attrs "progressive use-worker"` adds the pipeline options, and
 ```bash
 cd my-site
 bevara install theora ogg vorbis       # -> accessors/theora_1.wasm …, bevara.json, bevara-lock.json
-bevara list                            # prints the with="…" attribute to paste
+bevara filters                         # prints the with="…" and using="…" attributes to paste
 bevara audit                           # integrity, advisories, deprecations, licences
 bevara update                          # within the semver ranges; --latest to cross majors
 ```
@@ -181,7 +181,8 @@ directly (newest non-deprecated version, brotli, CORS).
 | `bevara update [f…]` | newest versions in range (`--latest` ignores ranges) |
 | `bevara outdated` | current / wanted / latest table |
 | `bevara audit [--fix]` | integrity vs lockfile & registry, module validity, advisories, deprecations, outdated, licence flags; exit 1 on findings (`--audit-level`) |
-| `bevara list [--remote]` | installed filters, or the registry catalog |
+| `bevara filters [--remote]` | installed filters, or the registry catalog (alias `list`) |
+| `bevara runtimes [--remote]` | installed runtimes (solvers), or those the registry publishes |
 | `bevara probe <file\|url>` | identify a media file (container, streams, codecs) and the accessors it needs |
 | `bevara update-page <file.html>` | rewrite a page so its media elements use the universal tags |
 | `bevara search <q>` / `bevara info <f>` | catalog queries |

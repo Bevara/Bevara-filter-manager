@@ -4,7 +4,7 @@ import { log, color, table, formatBytes, CliError } from '../lib/ui.js';
 import { clientFor, Project } from '../lib/ctx.js';
 
 export const options = { remote: { type: 'boolean', short: 'a' }, support: { type: 'string' }, format: { type: 'string' }, long: { type: 'boolean', short: 'l' } };
-export const help = `bevara list       the filters (accessors)
+export const help = `bevara filters    the filters (accessors)
 bevara runtimes   the runtimes (solvers) filters link against
 
 In a site project, what is installed; outside one (or with --remote), what the
@@ -19,9 +19,10 @@ Options:
   --support <kind>        registry only: filter by media kind (image, audio, video…)
   --format <name>         registry only: filter by handled format (e.g. Theora)`;
 
+// bevara filters (also: list, ls)
 export async function run({ args = [], opts }) {
-  if (args.length > 1 || (args[0] && !['filters', 'filter'].includes(args[0].toLowerCase()))) {
-    throw new CliError(`bevara list ${args.join(' ')}: list takes no argument but "filters"`, { hint: /^runtimes?$/i.test(args[0] ?? '') ? 'the runtimes are listed by `bevara runtimes`' : 'bevara list lists the filters; bevara runtimes the runtimes' });
+  if (args.length) {
+    throw new CliError(`bevara filters takes no argument (got ${args.join(' ')})`, { hint: /^runtimes?$/i.test(args[0]) ? 'the runtimes are listed by `bevara runtimes`' : 'bevara filters lists the filters, bevara runtimes the runtimes' });
   }
   return listWhat(opts, 'filters');
 }

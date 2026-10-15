@@ -286,7 +286,7 @@ registry lacks, or a registry with no runtime at all, are reported as such
 (not as a conflict), and an accessor without `"using"` is flagged. `test` and
 `bench` refuse a combination (automatic or `-W`) whose installed accessors
 share no runtime, and run it with one they share (`--solver` must be one).
-`bevara list` lists the filters only, with their runtimes - in red when the
+`bevara filters` (alias `list`) lists the filters only, with their runtimes - in red when the
 registry does not publish them - and in a site the `using="…"` they all share;
 `bevara runtimes` lists the runtimes: the `using=` name, the built-in filters
 and how many filters link against each. Both show the Emscripten version each

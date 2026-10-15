@@ -9,7 +9,7 @@ export const COMMANDS = {
   update: { alias: ['up', 'upgrade'], desc: 'Update installed filters to the newest allowed versions', usage: '[filter...]', mod: './commands/update.js' },
   outdated: { desc: 'Show filters with newer versions on the registry', mod: './commands/outdated.js' },
   audit: { desc: 'Check installed filters: integrity, advisories, deprecations, licences', mod: './commands/audit.js' },
-  list: { alias: ['ls'], desc: 'List filters (installed in the project, or on the registry with --remote)', mod: './commands/list.js' },
+  filters: { alias: ['list', 'ls'], desc: 'List filters (installed in the project, or on the registry with --remote)', mod: './commands/list.js' },
   runtimes: { alias: ['runtime'], desc: 'List runtimes (solvers): using= name, emsdk, built-in filters, filters using them', mod: './commands/list.js', fn: 'runtimes' },
   search: { alias: ['find'], desc: 'Search filters on the registry', usage: '<query>', mod: './commands/search.js' },
   info: { alias: ['view', 'show'], desc: 'Show details about a filter', usage: '<filter[@version]>', mod: './commands/info.js' },

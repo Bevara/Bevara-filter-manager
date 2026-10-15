@@ -37,7 +37,8 @@ Or manage the accessors yourself:
 
 ```bash
 bevara install theora ogg vorbis   # -> accessors/theora_1.wasm …, bevara.json, bevara-lock.json
-bevara list                        # prints the with="…" attribute to paste
+bevara filters                     # prints the with="…" and using="…" attributes to paste
+bevara runtimes                    # the runtimes (solvers) filters link against
 bevara audit                       # integrity, signatures, advisories, deprecations, licences
 bevara update                      # within the semver ranges; --latest to cross majors
 ```
