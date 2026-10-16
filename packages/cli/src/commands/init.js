@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prompt, log, color, CliError } from '../lib/ui.js';
-import { NAME_RE, SUPPORT_VALUES } from '../lib/manifest.js';
+import { NAME_RE, SUPPORT_VALUES, PATENT_STATUSES } from '../lib/manifest.js';
 import { MANIFEST, writeJsonFile, filterManifestsIn } from '../lib/project.js';
 import { accessorFileName } from '../lib/wasm.js';
 
@@ -10,9 +10,12 @@ export const options = {
   name: { type: 'string', short: 'n' },
   force: { type: 'boolean', short: 'f' },
   site: { type: 'boolean' },
+  patents: { type: 'string' },
 };
 
 export const help = `Options:
+  --patents <status>  patent status of the format: royalty-free, expired, licence-required,
+                      under-review (default: asked; under-review with -y)
   -n, --name <name>   filter name (default: current directory name)
   -y, --yes           accept all defaults
   -f, --force         overwrite an existing manifest
@@ -44,6 +47,9 @@ export async function run({ args, opts }) {
   const license = await ask('Licence (SPDX identifier, written to LICENCE)', 'MIT');
   const holder = await ask('Copyright holder', 'Bevara Technologies, LLC');
   const sources = await ask('Sources URL', `https://github.com/Bevara/${name}`);
+  // The patent status of the format: any is published, the restricted ones are announced to users.
+  if (opts.patents !== undefined && !PATENT_STATUSES.includes(opts.patents)) throw new CliError(`--patents ${opts.patents}: one of ${PATENT_STATUSES.join(', ')}`);
+  const patentStatus = opts.patents ?? await ask(`Patent status of the format (${PATENT_STATUSES.join(', ')})`, 'under-review', { validate: (v) => (PATENT_STATUSES.includes(v) ? null : `one of ${PATENT_STATUSES.join(', ')}`) });
   // Required to publish: the runtimes (solvers) the module links against, each
   // published on the registry (a registry may carry several, per environment).
   const using = await ask('Runtimes it links against, as pages name them (comma separated)', 'solver_1', { validate: (v) => (v.split(',').map((x) => x.trim()).filter(Boolean).every((u) => /^[A-Za-z0-9][A-Za-z0-9._-]*_\d+$/.test(u)) ? null : 'e.g. solver_1, solver_minimal_1') });
@@ -64,7 +70,7 @@ export async function run({ args, opts }) {
     help: description,
     support: split(support),
     Format: split(formats),
-    licence_required: false,
+    patents: { status: patentStatus, checked: new Date().toISOString().slice(0, 10) },
     using: split(using),
     sources, filter_source: Object.fromEntries(split(gpacFilter).map((f) => [f, `src/${name}.c`])),
     inputs: [{ stream_type: 'visual', codec: name }], outputs: [{ stream_type: 'visual', codec: 'raw' }],

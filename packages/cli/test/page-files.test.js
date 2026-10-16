@@ -74,7 +74,7 @@ test('a runtime: generation from add_executable, built-in filters from loader.js
   fs.writeFileSync(path.join(dir, 'CMakeLists.txt'), 'cmake_minimum_required(VERSION 3.7)\nset(VERSION "1")\n# add_executable(old_${VERSION} x.c)\nadd_executable(solver_minimal_${VERSION} ${SRC})\n');
   fs.writeFileSync(path.join(dir, 'loader.js'), 'addFunction(Module._fin_register); Module._fout_register; Module._auto_register; Module._fin_register');
   fs.writeFileSync(path.join(dir, 'LICENCE'), 'SPDX-License-Identifier: LGPL-2.1-or-later\n');
-  fs.writeFileSync(path.join(dir, 'solver_minimal.json'), JSON.stringify({ name: 'solver_minimal', kind: 'runtime', description: 'x' }));
+  fs.writeFileSync(path.join(dir, 'solver_minimal.json'), JSON.stringify({ name: 'solver_minimal', kind: 'runtime', description: 'x', patents: { status: 'royalty-free' } }));
   assert.deepEqual(readExecutables(dir).map((e) => [e.name, e.generation]), [['solver_minimal', 1]]);
   assert.deepEqual(runtimeBuiltins(dir), ['fin', 'fout']);
   const m = filterManifest(Project.load({ dir }));
@@ -88,7 +88,7 @@ test('a runtime: generation from add_executable, built-in filters from loader.js
 });
 
 test('a filter must name its runtimes in "using" to be published', () => {
-  const f = { name: 'x', version: '1.0.0', filters: ['xdec'] };
+  const f = { name: 'x', version: '1.0.0', filters: ['xdec'], patents: { status: 'expired' } };
   assert.ok(validateManifest(f, { forPublish: true }).errors.some((e) => /"using" must list the runtimes/.test(e)));
   assert.deepEqual(validateManifest({ ...f, using: ['solver_1'] }, { forPublish: true }).errors, []);
 });

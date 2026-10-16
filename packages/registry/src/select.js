@@ -168,11 +168,14 @@ export function sideConditions(entry, q) {
   if (q.projects.length && !(entry.projects ?? []).some((p) => q.projects.some((w) => bare(w) === bare(p)))) return `projects ${(entry.projects ?? []).join(', ') || 'unknown'}`;
   if (q.size.condition && !(entry.size <= q.size.maxsize)) return `size ${entry.size} > ${q.size.maxsize}`;
   if (q.ip.condition) {
-    if (entry.licence_required) {
-      const geo = entry.georestrictions;
-      const where = Array.isArray(geo) ? geo.map((g) => String(g).toUpperCase()) : null;
-      // No list: the licence is required wherever the module runs.
-      if (!where || !q.ip.geocode || where.includes(q.ip.geocode)) return `a patent licence is required${where ? ` in ${where.join(', ')}` : ''}`;
+    // Patent status: a licence required, or a status under review, rules the
+    // accessor out where it applies (everywhere, or the regions listed that
+    // contain geocode); an undeclared status is not assumed free.
+    const p = entry.patents;
+    if (!p?.status) return 'patent status undeclared';
+    if (p.status === 'licence-required' || p.status === 'under-review') {
+      const where = p.regions?.length ? p.regions.map((g) => String(g).toUpperCase()) : null;
+      if (!where || !q.ip.geocode || where.includes(q.ip.geocode)) return `patents ${p.status}${where ? ` in ${where.join(', ')}` : ''}${p.note ? ` (${p.note})` : ''}`;
     }
     if (q.ip.license.length && !q.ip.license.some((l) => l.toLowerCase() === String(entry.license ?? '').toLowerCase())) return `licence ${entry.license ?? 'unknown'}`;
   }
@@ -215,7 +218,7 @@ export function selectAccessors(entries, query) {
       matches.push({
         name: e.name, version: e.version, file: e.file, url: e.url, filter: f.filter, priority: f.priority ?? 0,
         size: e.size, brSize: e.brSize, projects: e.projects, language: e.language ?? 'wasm', license: e.license,
-        licence_required: !!e.licence_required, using: e.using,
+        patents: e.patents ?? null, using: e.using,
         accepts: bundle?.inputs ?? [], produces: [...(bundle?.outputs ?? []), ...(f.runtime?.outputs ?? [])].filter((c) => !c.excluded),
       });
     }

@@ -1,3 +1,4 @@
+import { patentNotice } from '../lib/manifest.js';
 import fs from 'node:fs';
 import semver from 'semver';
 import { log, color, table, CliError } from '../lib/ui.js';
@@ -13,7 +14,7 @@ export const help = `Checks every installed filter against the registry:
   • advisories    security/quality advisories published for the installed version
   • deprecated    filter or version marked deprecated by its owner
   • outdated      newer versions inside / outside the allowed range
-  • licence       filters flagged "licence_required"
+  • patents      filters whose patent status is licence-required or under-review
   • signature     the publisher's Ed25519 signature still verifies for the installed bytes
   • log           the registry's append-only log extends the checkpoint pinned in bevara-lock.json,
                   the installed versions are present in it and were not yanked
@@ -77,7 +78,11 @@ export async function run({ opts }) {
     const inRange = range && range !== 'latest' ? newer.filter((v) => semver.satisfies(v, range)) : newer;
     if (inRange.length) add(name, 'low', 'outdated', `${semver.maxSatisfying(inRange, '*')} is available (installed ${entry.version})`, true);
     else if (newer.length) add(name, 'low', 'outdated', `${semver.maxSatisfying(newer, '*')} is available outside the range ${range} (bevara update --latest)`);
-    if (r.version?.licence_required) add(name, 'low', 'licence', `${name} requires a licence (${r.version.license ?? 'see documentation'})`);
+    // Patent status: a licence required, or a status under review, is reported.
+    const pat = r.version?.patents;
+    if (pat?.status === 'licence-required') add(name, 'moderate', 'patents', `${name}: ${patentNotice(pat)}`);
+    else if (pat?.status === 'under-review') add(name, 'low', 'patents', `${name}: ${patentNotice(pat)}`);
+    else if (r.version && !pat) add(name, 'low', 'patents', `${name}@${entry.version} does not declare its patent status`);
 
     // Publisher signature over the bytes we have on disk.
     const sig = r.version?.signature;

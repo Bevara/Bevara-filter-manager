@@ -1,3 +1,4 @@
+import { isRestricted, patentNotice } from '../lib/manifest.js';
 import path from 'node:path';
 import { log, color, table, formatBytes, CliError } from '../lib/ui.js';
 import { clientFor, Project } from '../lib/ctx.js';
@@ -101,10 +102,10 @@ function printResolved(match, opts, registry) {
   console.log(table(match.needs.map((n) => {
     const e = n.chosen;
     return e
-      ? [color.green('✓'), describeNeed(n), color.bold(e.module), e.name, e.version, formatBytes(e.brSize ?? e.size), color.dim(e.using?.length ? `${e.using.join('|')} only` : ''), (e.license ?? '') + (e.licence_required ? color.yellow('*') : '')]
+      ? [color.green('✓'), describeNeed(n), color.bold(e.module), e.name, e.version, formatBytes(e.brSize ?? e.size), color.dim(e.using?.length ? `${e.using.join('|')} only` : ''), (e.license ?? '') + (isRestricted(e.patents) ? color.yellow(` ${e.patents.status}`) : '')]
       : [color.red('✗'), describeNeed(n), color.dim(n.unidentified ? 'MediaInfo could not identify it' : 'no published accessor declares it'), '', '', '', '', ''];
   }), { indent: '    ' }));
-  if (match.needs.some((n) => n.chosen?.licence_required)) console.log(color.dim('    * requires a licence'));
+  for (const e of [...new Set(match.needs.map((n) => n.chosen).filter((e) => isRestricted(e?.patents)))]) log.warn(`${e.module}: ${patentNotice(e.patents)}`);
   if (opts.all) {
     const alt = match.needs.flatMap((n) => n.candidates.slice(1).map((c) => [describeNeed(n), c.module, c.name, c.version, color.dim(`priority ${c.priority ?? 50}`)]));
     if (alt.length) {

@@ -1,4 +1,5 @@
-import { color, table, formatBytes, CliError } from '../lib/ui.js';
+import { log, color, table, formatBytes, CliError } from '../lib/ui.js';
+import { patentNotice } from '../lib/manifest.js';
 import { clientFor, Project } from '../lib/ctx.js';
 import { parseSpec, pickVersion } from '../lib/resolve.js';
 
@@ -11,7 +12,8 @@ export async function run({ args, opts }) {
   if (!version) throw new CliError(`no version of ${name} matches "${range}"`);
   const v = p.versions[version];
   if (opts.json) return console.log(JSON.stringify({ ...v, owners: p.owners, versions: Object.keys(p.versions), advisories: p.advisories }, null, 2));
-  console.log(`${color.bold(name)}@${color.green(version)} ${color.dim(`abi ${v.abi} · ${v.license ?? 'no license'}${v.licence_required ? ' (licence required)' : ''}`)}`);
+  console.log(`${color.bold(name)}@${color.green(version)} ${color.dim(`abi ${v.abi} · ${v.license ?? 'no license'} · patents ${v.patents?.status ?? 'undeclared'}`)}`);
+  if (patentNotice(v.patents)) log.warn(patentNotice(v.patents));
   if (p.deprecated) console.log(color.yellow(`DEPRECATED: ${p.deprecated}`));
   if (v.deprecated) console.log(color.yellow(`DEPRECATED ${version}: ${v.deprecated}`));
   console.log(v.description ?? '');

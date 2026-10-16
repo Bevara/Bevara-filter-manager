@@ -11,7 +11,7 @@ import { Store } from './store.js';
 import { Ledger } from './ledger.js';
 import { extractTarball } from './tarball.js';
 import { inspectWasm, accessorFileName } from './wasm.js';
-import { validateManifest, normalizeManifest, publicManifest, NAME_RE, PART_RE, fullName, splitName, shortName } from './manifest.js';
+import { validateManifest, normalizeManifest, publicManifest, patentNotice, NAME_RE, PART_RE, fullName, splitName, shortName } from './manifest.js';
 import { verifyRecord, keyIdOf, canonicalize } from './sig.js';
 import { Router, HttpError, json, html, redirect, readBody, readJson, readForm, sendFile, bearer } from './http.js';
 import { catalogPage, loginFormPage, tokenPage } from './ui.js';
@@ -139,6 +139,16 @@ export function createApp(config = {}) {
     return all.filter((f, i) => all.findIndex((g) => g.file === f.file) === i);
   };
   const typeOf = (file) => (file.endsWith('.js') ? JS_TYPE : 'application/wasm');
+  // Every served module says its patent status, so that a page, a proxy or a
+  // tool that only sees the HTTP response can tell its users.
+  const patentHeaders = (row) => {
+    const p = JSON.parse(row.manifest).patents;
+    if (!p?.status) return { 'x-bevara-patents': 'undeclared' };
+    const h = { 'x-bevara-patents': p.status };
+    const notice = patentNotice(p);
+    if (notice) h['x-bevara-patents-notice'] = notice.replace(/[^\x20-\x7e]/g, '?');
+    return h;
+  };
 
   function versionDoc(req, row) {
     const m = JSON.parse(row.manifest);
@@ -341,7 +351,7 @@ export function createApp(config = {}) {
         name: r.name, namespace: splitName(r.name).namespace, latest: r.latest, description: r.description, deprecated: r.deprecated,
         kind: m.kind ?? 'filter', using: m.using, builtins: m.builtins, tags: m.tags, extends: m.extends, emsdk: m.emsdk, abi: r.abi, file: r.wasm_file, size: r.wasm_size, brSize: r.wasm_br_size,
         filters: m.filters ?? [], support: m.support ?? [], formats: m.formats ?? [], keywords: m.keywords ?? [],
-        license: m.license, licence_required: !!m.licence_required, priority: m.priority,
+        license: m.license, patents: m.patents ?? null, priority: m.priority,
         downloads: q.downloads.get(r.name).n, updated: r.updated_at,
       };
     });
@@ -384,13 +394,13 @@ export function createApp(config = {}) {
   // /accessors/acme:theora_1.wasm                -> another namespace
   // /accessors/bevara:theora/1.2.0/theora_1.wasm -> exact version
   const JS_TYPE = 'text/javascript; charset=utf-8';
-  const wasmHeaders = { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' };
+  const wasmHeaders = { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin', 'access-control-expose-headers': 'x-bevara-patents, x-bevara-patents-notice, x-bevara-version, x-bevara-name' };
   router.get('/accessors/:name/:version/:file', async (req, res, { params }) => {
     const row = q.version.get(validName(params.name), params.version);
     const f = row && filesOf(row).find((x) => x.file === params.file);
     if (!f) throw new HttpError(404, 'accessor not found');
     q.bumpDownloads.run(row.name, row.version);
-    await sendFile(req, res, store.path(row.name, row.version, f.file), typeOf(f.file), { ...wasmHeaders, 'cache-control': 'public, max-age=31536000, immutable', 'x-bevara-version': row.version });
+    await sendFile(req, res, store.path(row.name, row.version, f.file), typeOf(f.file), { ...wasmHeaders, ...patentHeaders(row), 'cache-control': 'public, max-age=31536000, immutable', 'x-bevara-version': row.version });
   });
 
   // The latest version of every filter that is not deprecated, as players and
@@ -402,7 +412,7 @@ export function createApp(config = {}) {
   const tagEntries = (req) => {
     const base = baseUrl(req);
     return latestRows().filter((r) => kindOf(r) === 'tags').flatMap((r) => filesOf(r).map((f) => ({
-      name: r.name, version: r.version, file: f.file, url: `${base}/accessors/${encodeURIComponent(r.name)}/${r.version}/${f.file}`, integrity: 'sha256-' + b64(f.sha256), size: f.size,
+      name: r.name, version: r.version, file: f.file, url: `${base}/accessors/${encodeURIComponent(r.name)}/${r.version}/${f.file}`, integrity: 'sha256-' + b64(f.sha256), size: f.size, patents: JSON.parse(r.manifest).patents ?? null,
     })));
   };
   // The solvers pages name in using="…": what update-page copies next to a page.
@@ -411,7 +421,7 @@ export function createApp(config = {}) {
     return latestRows().filter(isRuntime).map((r) => {
       const m = JSON.parse(r.manifest); const js = jsOf(r); const info = r.wasm_info ? JSON.parse(r.wasm_info) : {};
       const at = (f) => `${base}/accessors/${encodeURIComponent(r.name)}/${r.version}/${f}`;
-      return { name: r.name, version: r.version, abi: r.abi, module: r.wasm_file.replace(/\.wasm$/, ''), description: m.description, builtins: m.builtins, emsdk: m.emsdk, license: m.license, projects: m.projects,
+      return { name: r.name, version: r.version, abi: r.abi, module: r.wasm_file.replace(/\.wasm$/, ''), description: m.description, builtins: m.builtins, emsdk: m.emsdk, license: m.license, patents: m.patents ?? null, projects: m.projects,
         file: r.wasm_file, url: at(r.wasm_file), integrity: 'sha256-' + b64(r.wasm_sha256), size: r.wasm_size, brSize: r.wasm_br_size,
         js: js?.file, jsUrl: js && at(js.file), jsIntegrity: js && 'sha256-' + b64(js.sha256), jsSize: js?.size, keyId: info.signature?.keyId, logSeq: info.signature?.logSeq };
     });
@@ -419,7 +429,7 @@ export function createApp(config = {}) {
   const indexEntries = (req) => {
     const base = baseUrl(req);
     return latestRows().filter((r) => kindOf(r) === 'filter')
-      .map((r) => { const m = JSON.parse(r.manifest); const info = r.wasm_info ? JSON.parse(r.wasm_info) : {}; return { name: r.name, version: r.version, abi: r.abi, file: r.wasm_file, url: `${base}/accessors/${encodeURIComponent(r.name)}/${r.version}/${r.wasm_file}`, filters: m.filters, support: m.support, formats: m.formats, extension: m.extension, using: m.using, inputs: m.inputs, outputs: m.outputs, priority: m.priority, caps: m.caps, projects: m.projects, language: m.language ?? 'wasm', emsdk: m.emsdk, license: m.license, licence_required: !!m.licence_required, georestrictions: m.georestrictions, dependencies: m.dependencies, size: r.wasm_size, brSize: r.wasm_br_size, integrity: 'sha256-' + b64(r.wasm_sha256), keyId: info.signature?.keyId, logSeq: info.signature?.logSeq }; });
+      .map((r) => { const m = JSON.parse(r.manifest); const info = r.wasm_info ? JSON.parse(r.wasm_info) : {}; return { name: r.name, version: r.version, abi: r.abi, file: r.wasm_file, url: `${base}/accessors/${encodeURIComponent(r.name)}/${r.version}/${r.wasm_file}`, filters: m.filters, support: m.support, formats: m.formats, extension: m.extension, using: m.using, inputs: m.inputs, outputs: m.outputs, priority: m.priority, caps: m.caps, projects: m.projects, language: m.language ?? 'wasm', emsdk: m.emsdk, license: m.license, patents: m.patents ?? null, dependencies: m.dependencies, size: r.wasm_size, brSize: r.wasm_br_size, integrity: 'sha256-' + b64(r.wasm_sha256), keyId: info.signature?.keyId, logSeq: info.signature?.logSeq }; });
   };
 
   router.get('/accessors/index.json', (req, res) => {
@@ -481,7 +491,7 @@ export function createApp(config = {}) {
     const f = filesOf(row).find((x) => x.file === wanted);
     if (!f) throw new HttpError(404, m[3] === 'js' ? `${row.name} has no ${wanted}` : `this accessor is published as ${row.wasm_file}`);
     q.bumpDownloads.run(row.name, row.version);
-    await sendFile(req, res, store.path(row.name, row.version, f.file), typeOf(f.file), { ...wasmHeaders, 'cache-control': 'public, max-age=300', 'x-bevara-version': row.version, 'x-bevara-name': row.name });
+    await sendFile(req, res, store.path(row.name, row.version, f.file), typeOf(f.file), { ...wasmHeaders, ...patentHeaders(row), 'cache-control': 'public, max-age=300', 'x-bevara-version': row.version, 'x-bevara-name': row.name });
   });
 
   // ------------------------------------------------------------- publish
@@ -608,6 +618,9 @@ export function createApp(config = {}) {
       if (shared.length) warnings.push(`GPAC filter${shared.length > 1 ? 's' : ''} ${shared.join(', ')} also registered by ${other.name}: a page linking both would register ${shared.length > 1 ? 'them' : 'it'} twice`);
     }
 
+    // Any patent status is accepted and served; the restricted ones are
+    // announced to the users of the module.
+    if (patentNotice(manifest.patents)) warnings.push(`${name}: ${patentNotice(manifest.patents)} - users are told when they install, select or load it`);
     // A tag that builds on another one needs that one on the registry.
     for (const [script, base] of Object.entries(tagsPkg ? manifest.extends ?? {} : {})) {
       const holder = db.prepare('SELECT name FROM accessor_names WHERE key = ?').get(base.replace(/_\d+$/, '').toLowerCase())?.name;
@@ -794,7 +807,7 @@ export function createApp(config = {}) {
       report[rawName] = {
         found: true, name, latest: filter.latest, deprecated: filter.deprecated,
         versions: rows.map((r) => ({ version: r.version, abi: r.abi, deprecated: r.deprecated })),
-        version: row ? { version: row.version, integrity: 'sha256-' + b64(row.wasm_sha256), deprecated: row.deprecated, publishedAt: row.published_at, license: m.license, licence_required: !!m.licence_required, signature: sig } : null,
+        version: row ? { version: row.version, integrity: 'sha256-' + b64(row.wasm_sha256), deprecated: row.deprecated, publishedAt: row.published_at, license: m.license, patents: m.patents ?? null, signature: sig } : null,
         advisories,
       };
     }

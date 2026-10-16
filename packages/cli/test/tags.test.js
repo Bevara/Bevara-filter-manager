@@ -10,7 +10,7 @@ import { pageRequirements, locateSources } from '../src/lib/page-files.js';
 
 function player(over = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-tags-'));
-  fs.writeFileSync(path.join(dir, 'universal-tags.json'), JSON.stringify({ name: 'universal-tags', kind: 'tags', description: 'tags', tags: ['universal-img_1.js', 'universal-video_1.js'], main: 'build/dist', ...over }));
+  fs.writeFileSync(path.join(dir, 'universal-tags.json'), JSON.stringify({ name: 'universal-tags', kind: 'tags', description: 'tags', tags: ['universal-img_1.js', 'universal-video_1.js'], main: 'build/dist', patents: { status: 'royalty-free' }, ...over }));
   fs.writeFileSync(path.join(dir, 'LICENCE'), 'SPDX-License-Identifier: ISC\n');
   fs.mkdirSync(path.join(dir, 'build', 'dist'), { recursive: true });
   for (const t of ['universal-img_1.js', 'universal-video_1.js']) fs.writeFileSync(path.join(dir, 'build', 'dist', t), `/*! notice */ define("${t}")`);
@@ -34,7 +34,7 @@ test('a tags package: generation from its scripts, packed with every script, no 
 test('a tags package is checked: scripts of one generation, built, "extends" naming its own scripts', async () => {
   assert.ok(validateManifest({ name: 'x', version: '1.0.0', kind: 'tags', tags: ['a_1.js', 'b_2.js'] }).errors.some((e) => /one generation/.test(e)));
   assert.ok(validateManifest({ name: 'x', version: '1.0.0', kind: 'tags', tags: ['a_1.js'], extends: { 'c_1.js': 'universal-img_1' } }).errors.some((e) => /not in "tags"/.test(e)));
-  assert.deepEqual(validateManifest({ name: 'x', version: '1.0.0', kind: 'tags', tags: ['my-img_1.js'], extends: { 'my-img_1.js': 'universal-img_1' } }, { forPublish: true }).errors, []);
+  assert.deepEqual(validateManifest({ name: 'x', version: '1.0.0', kind: 'tags', tags: ['my-img_1.js'], extends: { 'my-img_1.js': 'universal-img_1' }, patents: { status: 'royalty-free' } }, { forPublish: true }).errors, []);
   const dir = player();
   fs.rmSync(path.join(dir, 'build', 'dist', 'universal-video_1.js'));
   await assert.rejects(packFilter(Project.load({ dir }), { dryRun: true }), /tag scripts not found/);

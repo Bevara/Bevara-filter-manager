@@ -42,6 +42,7 @@ these requirements, and the alternatives rejected, are in
 | [R27](#r27) | A build without the right emsdk offers to download it and sets up its environment; declining shows how to use one's own | 2026-10-16 |
 | [R28](#r28) | Tag scripts are packages (kind "tags"), listed by `bevara tags`; update-page writes them so the page works as is | 2026-10-16 |
 | [R29](#r29) | Only filters free of patent and licence obstacles to worldwide deployment are published on the default registry | 2026-10-16 |
+| [R30](#r30) | Every package states its patent status; any is distributed, the restricted ones are announced to users | 2026-10-16 |
 
 ---
 
@@ -385,16 +386,28 @@ is copied alone next to a page.
 
 ### R29
 **The default registry carries the filters that can be deployed worldwide
-without a patent or licence obstacle.** A filter is published when its formats
-are royalty-free or their patents have expired everywhere (MP3, AC-3,
-MPEG-1/2, H.261/H.263, the Xiph and WebRTC codecs, JPEG family…), and when
-everything it links is under a free licence identified in its LICENCE (the
-GPL ones say that the accessor as a whole is GPL). Left out, in doubt or not:
-codecs with patents still asserted (HEVC, H.264, VVC, EVC, AVS2/3, AV2, AAC,
-AMR, DTS, LC3, SILK, and what a patent pool claims over VP8/VP9/AV1, SBC),
-non-free licences (Monkey's Audio), AGPL code (MuPDF, jbig2dec), and what the
-repository itself marks `licence_required` (ffdmx).
+without a patent or licence obstacle** (as published on 2026-10-16). A filter
+was published when its formats are royalty-free or their patents have expired
+everywhere, and when everything it links is under a free licence identified in
+its LICENCE (the GPL ones say that the accessor as a whole is GPL). Since R30
+the registry can carry any status; this requirement is now the publication
+policy of the default registry, recorded in each manifest's `"patents"`.
 
-- Where: the LICENCE file of each filter repository; the classification is in the 2026-10-16 publication report
+- Where: the LICENCE file and `"patents"` of each filter repository
 - Checked by: review - the decision is legal, not mechanical
+
+### R30
+**Every package states its patent status, and the registry tells end users
+about the restricted ones** (2026-10-16). `"patents": {"status", "note",
+"regions", "checked"}` replaces `licence_required` (removed, with
+`georestrictions`); the status is `royalty-free`, `expired`,
+`licence-required` or `under-review`, required to publish. The registry
+accepts and distributes every status; the restricted ones are announced at
+publish, in the index, in the `X-Bevara-Patents(-Notice)` headers of each
+served file, and by the CLI (install, update-page, probe, filters, info,
+audit); the capability query's IP condition excludes them, and an undeclared
+status. All 89 filter repositories, both solvers and the tags package declare it.
+
+- Where: `PATENT_STATUSES`, `patentNotice` in `manifest.js`; `patentHeaders` and publish in `registry/src/app.js`; the CLI commands
+- Checked by: `registry.test.js` "patent status", `cli/test/select.test.js` (IP condition by region), e2e
 

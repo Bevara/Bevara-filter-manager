@@ -31,7 +31,7 @@ $BEVARA whoami | grep -q alice
 
 step "publish the runtime solver_1 that filters name in \"using\" (required, and checked by the registry)"
 mkdir -p "$WORK/solver" && cd "$WORK/solver"
-printf '{ "name": "solver", "kind": "runtime", "description": "Test solver" }\n' > solver.json
+printf '{ "name": "solver", "kind": "runtime", "description": "Test solver", "patents": { "status": "royalty-free" } }\n' > solver.json
 printf 'cmake_minimum_required(VERSION 3.7)\nset(VERSION "1")\nadd_executable(solver_${VERSION} gpac.c)\n' > CMakeLists.txt
 printf 'Module._fin_register; Module._fout_register;\n' > loader.js
 printf 'SPDX-License-Identifier: LGPL-2.1-or-later\n' > LICENCE
@@ -41,7 +41,7 @@ curl -fs -o /dev/null -w '%{http_code} %{content_type}\n' "$BEVARA_REGISTRY/acce
 
 step "publish the tag scripts (kind \"tags\"), then list them with bevara tags"
 mkdir -p "$WORK/player/build/dist" && cd "$WORK/player"
-printf '{ "name": "universal-tags", "kind": "tags", "description": "Universal elements", "tags": ["universal-img_1.js", "universal-video_1.js"], "main": "build/dist" }\n' > universal-tags.json
+printf '{ "name": "universal-tags", "kind": "tags", "description": "Universal elements", "tags": ["universal-img_1.js", "universal-video_1.js"], "main": "build/dist", "patents": { "status": "royalty-free" } }\n' > universal-tags.json
 printf 'SPDX-License-Identifier: ISC\n' > LICENCE
 printf '/*! notice */ customElements.define("universal-img_1")\n' > build/dist/universal-img_1.js
 printf '/*! notice */ customElements.define("universal-video_1")\n' > build/dist/universal-video_1.js
@@ -51,7 +51,7 @@ curl -fs "$BEVARA_REGISTRY/accessors/universal-img_1.js" | grep -q 'universal-im
 
 step "init a filter (non-interactive) and fake the build with the fixture"
 mkdir -p "$WORK/dummy" && cd "$WORK/dummy"
-$BEVARA init -y -n dummy
+$BEVARA init -y -n dummy --patents royalty-free
 check test -f dummy.json
 check test ! -f bevara.json
 check test -f CMakeLists.txt
@@ -71,7 +71,7 @@ expect_fail $BEVARA publish -y --no-sign
 
 step "publish a second filter depending on dummy"
 mkdir -p "$WORK/second" && cd "$WORK/second"
-$BEVARA init -y -n second
+$BEVARA init -y -n second --patents royalty-free
 mkdir -p build && cp "$FIXTURE" build/second_1.wasm
 node -e "const f='second.json',m=JSON.parse(require('fs').readFileSync(f));m.dependencies={dummy:'^1.0.0'};require('fs').writeFileSync(f,JSON.stringify(m,null,2))"
 $BEVARA publish -y
@@ -149,7 +149,7 @@ cat > legacy.json <<'JSON'
     ],
     "sources":"https://github.com/Bevara/legacy",
     "Format": ["Legacy"],
-    "licence_required":false,
+    "patents": { "status": "royalty-free" },
     "using": ["solver_1"]
 }
 JSON
@@ -182,7 +182,7 @@ $BEVARA install dummy >/dev/null
 node -e "
 const fs=require('fs');
 const a=fs.readFileSync('legacy.json.orig','utf8').split('\\n'), b=fs.readFileSync('legacy.json','utf8').split('\\n');
-for (const l of a) if (!b.includes(l) && !/\\}\\s*$/.test(l) && !/licence_required|"using"/.test(l)) { console.error('line changed or lost: '+l); process.exit(1); }
+for (const l of a) if (!b.includes(l) && !/\\}\\s*$/.test(l) && !/"patents"|"using"/.test(l)) { console.error('line changed or lost: '+l); process.exit(1); }
 if (!b.some(l=>l.includes('\"filters\":[\"legacydec\"]'))) { console.error('compact array was reformatted'); process.exit(1); }
 console.log('  legacy.json kept its layout; added:', b.filter(l=>!a.includes(l)).map(s=>s.trim()).join(' '));"
 check test ! -f bevara.json
@@ -271,11 +271,11 @@ $BEVARA log | grep -q yanked
 step "namespaces: any account publishes in bevara:, its own namespace stays its own, chain still verifies"
 # bob is not an administrator: a bare name still publishes, in the default namespace.
 mkdir -p "$WORK/bobopen" && cd "$WORK/bobopen"
-$BEVARA init -y -n bobopen
+$BEVARA init -y -n bobopen --patents royalty-free
 mkdir -p build && cp "$FIXTURE" build/bobopen_1.wasm
 $BEVARA publish -y | grep 'bevara:bobopen@1.0.0' >/dev/null
 mkdir -p "$WORK/bobfilter" && cd "$WORK/bobfilter"
-$BEVARA init -y -n mine
+$BEVARA init -y -n mine --patents royalty-free
 mkdir -p build && cp "$FIXTURE" build/mine_1.wasm
 node -e "const f='mine.json',m=JSON.parse(require('fs').readFileSync(f));m.name='bob:mine';require('fs').writeFileSync(f,JSON.stringify(m,null,2))"
 $BEVARA publish -y | grep 'bob:mine@1.0.0' >/dev/null

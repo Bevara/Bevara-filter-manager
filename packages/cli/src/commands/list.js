@@ -2,6 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { log, color, table, formatBytes, CliError } from '../lib/ui.js';
 import { clientFor, Project } from '../lib/ctx.js';
+import { isRestricted } from '../lib/manifest.js';
+
+// The patent status, yellow when users must be told.
+const patentCell = (p) => (!p?.status ? color.dim('?') : isRestricted(p) ? color.yellow(p.status) : p.status);
 
 export const options = { remote: { type: 'boolean', short: 'a' }, support: { type: 'string' }, format: { type: 'string' }, long: { type: 'boolean', short: 'l' } };
 export const help = `bevara filters    the filters (accessors)
@@ -144,18 +148,19 @@ async function listRemote(project, opts, what) {
   }
 
   console.log(`${filters.length} filter${filters.length === 1 ? '' : 's'} on ${color.dim(registry)}\n`);
-  const header = ['Filter', 'Version', 'Description', 'Formats', 'Support', 'Runtimes', 'emsdk'];
+  const header = ['Filter', 'Version', 'Description', 'Formats', 'Support', 'Runtimes', 'emsdk', 'Patents'];
   if (opts.long) header.push('Size', 'Brotli', 'License', 'Downloads');
   console.log(table(filters.map((f) => {
-    const row = [f.deprecated ? color.yellow(f.name) : color.bold(f.name), f.latest ?? '', (f.description ?? '').slice(0, 60), (f.formats ?? []).join(','), (f.support ?? []).join(','), runtimeCell(f), f.emsdk ?? color.dim('?')];
-    if (opts.long) row.push(formatBytes(f.size), formatBytes(f.brSize), (f.license ?? '') + (f.licence_required ? '*' : ''), String(f.downloads));
+    const row = [f.deprecated ? color.yellow(f.name) : color.bold(f.name), f.latest ?? '', (f.description ?? '').slice(0, 60), (f.formats ?? []).join(','), (f.support ?? []).join(','), runtimeCell(f), f.emsdk ?? color.dim('?'), patentCell(f.patents)];
+    if (opts.long) row.push(formatBytes(f.size), formatBytes(f.brSize), f.license ?? '', String(f.downloads));
     return row;
-  }), { header: header.map(color.bold), shrink: [2, 3, 4, 5, 9] }));
+  }), { header: header.map(color.bold), shrink: [2, 3, 4, 5, 10] }));
 
   if (known && !runtimes.length) console.log(color.dim('\nno runtime published: filters cannot be loaded until one is (bevara publish --build in a solver directory)'));
   if (!known) console.log(color.dim('\nthis registry predates runtime packages: "Runtimes" is unknown'));
   const notes = [filters.some((f) => f.deprecated) && 'yellow = deprecated', known && filters.some((f) => f.using?.some((u) => !published.has(u))) && 'red = runtime not on this registry',
     known && filters.some((f) => f.using === undefined) && '? = "using" not published with it (republish it)',
-    filters.some((f) => !f.emsdk) && 'emsdk ? = published before the version was recorded'].filter(Boolean);
+    filters.some((f) => !f.emsdk) && 'emsdk ? = published before the version was recorded',
+    filters.some((f) => isRestricted(f.patents)) && 'yellow patents: a licence may be required (bevara info <filter> says why)'].filter(Boolean);
   if (notes.length) console.log(color.dim(`\n${notes.join(' · ')}`));
 }

@@ -45,11 +45,11 @@ export async function makeTarball(manifest, { wasm = FIXTURE_WASM, extra = {} } 
   return buf;
 }
 
-export const manifest = (over = {}) => ({ name: 'dummy', version: '1.0.0', abi: 1, description: 'Dummy decoder', filters: ['dummydec'], support: ['video'], formats: ['Dummy'], license: 'MIT', using: ['solver_1'], ...over });
+export const manifest = (over = {}) => ({ name: 'dummy', version: '1.0.0', abi: 1, description: 'Dummy decoder', filters: ['dummydec'], support: ['video'], formats: ['Dummy'], license: 'MIT', using: ['solver_1'], patents: { status: 'royalty-free' }, ...over });
 
 // A runtime (solver): a main module and its JavaScript, kind "runtime".
 export const RUNTIME_JS = Buffer.from('var libgpac = () => {};\n');
-export const runtimeManifest = (over = {}) => ({ name: 'solver', version: '1.0.0', abi: 1, kind: 'runtime', description: 'Test solver', license: 'LGPL-2.1-or-later', builtins: ['fin', 'fout'], ...over });
+export const runtimeManifest = (over = {}) => ({ name: 'solver', version: '1.0.0', abi: 1, kind: 'runtime', description: 'Test solver', license: 'LGPL-2.1-or-later', builtins: ['fin', 'fout'], patents: { status: 'royalty-free' }, ...over });
 
 // token -> signing key registered for that token's user
 export const keys = new Map();

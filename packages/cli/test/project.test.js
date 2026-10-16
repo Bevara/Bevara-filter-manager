@@ -27,7 +27,7 @@ const LIBJXL = `{
     "extension":{
       "jxl" : "img"
     },
-    "licence_required":false
+    "patents": {"status": "royalty-free"}
 }
 `;
 
@@ -112,15 +112,15 @@ describe('editing a hand-formatted manifest', () => {
 
   test('adding a key leaves every existing line as it was', () => {
     const out = updateJsonText(LIBJXL, before, { ...before, version: '1.0.0' }, 4);
-    const kept = LIBJXL.split('\n').filter((l) => !/licence_required/.test(l) && l !== '}');
+    const kept = LIBJXL.split('\n').filter((l) => !/"patents"/.test(l) && l !== '}');
     for (const l of kept) assert.ok(out.split('\n').includes(l), `lost or changed: ${l}`);
     assert.ok(out.includes('    "version": "1.0.0"'));
     assert.deepEqual(JSON.parse(out), { ...before, version: '1.0.0' });
   });
 
   test('changing one value rewrites only that value', () => {
-    const out = updateJsonText(LIBJXL, before, { ...before, licence_required: true }, 4);
-    assert.equal(out, LIBJXL.replace('"licence_required":false', '"licence_required":true'));
+    const out = updateJsonText(LIBJXL, before, { ...before, patents: { status: 'expired' } }, 4);
+    assert.equal(out, LIBJXL.replace('"patents": {"status": "royalty-free"}', '"patents": {\n        "status": "expired"\n    }'));
   });
 
   test('nested objects are indented at their own level', () => {

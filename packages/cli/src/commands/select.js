@@ -1,3 +1,4 @@
+import { isRestricted } from '../lib/manifest.js';
 import fs from 'node:fs';
 import { log, color, table, formatBytes, CliError } from '../lib/ui.js';
 import { clientFor, Project } from '../lib/ctx.js';
@@ -133,7 +134,7 @@ export async function run({ args, opts }) {
   if (matches.length) {
     console.log(table(matches.map((x) => [
       color.bold(x.file?.replace(/\.wasm$/, '') ?? x.name), x.filter ?? '', String(x.priority), x.size != null ? formatBytes(x.size) : '?',
-      (x.projects ?? []).filter((p) => p !== 'gpac').join(',') || 'gpac', x.license ?? color.dim('?'), x.licence_required ? color.yellow('patent') : '',
+      (x.projects ?? []).filter((p) => p !== 'gpac').join(',') || 'gpac', x.license ?? color.dim('?'), isRestricted(x.patents) ? color.yellow(x.patents.status) : '',
     ]), { header: ['Accessor', 'GPAC filter', 'Priority', 'Size', 'Projects', 'Licence', ''].map(color.bold) }));
     log.ok(`${matches.length} match${matches.length > 1 ? 'es' : ''} on ${where}, most preferred first`);
   } else log.warn(`no accessor on ${where} answers this query`);

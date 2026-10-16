@@ -27,7 +27,7 @@ The existing manifests are published as they are:
     "Format": ["JPEG XL"],            // MediaInfo format names handled; read as "formats" by the registry
     "extension": { "jxl": "img" },    // file extensions read, and the element that shows them
     "using": ["solver_minimal_1", "solver_1"],   // solvers the module links against (default: any)
-    "licence_required": false,        // true when the site owner needs a patent/commercial licence
+    "patents": { "status": "royalty-free", "checked": "2026-10-16" },   // see "Patent status" below
     "sources": "https://github.com/Bevara/libjxl",
     "filter_source": { "jxldec": "dec_jxl.c", "rfjxl": "reframe_jxl.c" }
 }
@@ -80,7 +80,6 @@ Optional fields, for new or updated manifests:
     "module": "theora",               // .wasm base name, when neither "name" nor add_filter() gives it
     "formats": ["Theora"],            // preferred spelling of "Format"
     "keywords": ["xiph", "ogg"],
-    "georestrictions": false,         // or ["US", "JP"]: where the patent licence of "licence_required" applies
     "runtime": {                      // formats a filter sets at run time, which its source cannot tell
         "theoradec": { "outputs": [{ "property": "GF_PROP_PID_PIXFMT", "format": ["GF_PIXEL_YUV", "GF_PIXEL_YUV422"] }] }
     },                                // bevara caps --write proposes them; see "Capabilities" below
@@ -128,6 +127,27 @@ publish (`bevara caps` shows it) and published as `caps`, one entry per filter:
 preferred). `runtime` merges the formats the code sets literally with those
 `<name>.json` declares (`"declared": true`). Never write `caps` by hand: the
 source is the reference. See DESIGN.md D13 and `GET /-/select` in REGISTRY_API.md.
+
+### Patent status
+
+Every package states the patent status of what it implements, required to
+publish:
+
+```jsonc
+"patents": {
+  "status": "licence-required",       // royalty-free | expired | licence-required | under-review
+  "note": "HEVC: Access Advance, Via LA",   // what is claimed, by whom
+  "regions": ["US", "JP"],            // ISO 3166 codes where it applies; absent = everywhere
+  "checked": "2026-10-16"             // date of the review
+}
+```
+
+The registry accepts and serves every status. The restricted ones
+(`licence-required`, `under-review`) are announced: at publish, in the index
+and `/filters`, in the `X-Bevara-Patents` and `X-Bevara-Patents-Notice`
+headers of every served file, and by the CLI (`install`, `update-page`,
+`probe`, `filters`, `info`, `audit`). The capability query's `IP` condition
+excludes them. `licence_required` and `georestrictions` are gone.
 
 ### Runtimes
 

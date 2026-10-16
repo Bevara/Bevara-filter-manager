@@ -49,7 +49,7 @@ for (const file of fs.readdirSync(o['wasm-dir']).sort()) {
     support: (src.support ?? []).map((s) => SUPPORT_MAP[s] ?? s),
     formats: src.Format ?? src.formats ?? [],
     license: src.license ?? o.license,
-    licence_required: !!src.licence_required,
+    patents: src.patents ?? { status: 'under-review', note: 'imported without a patent review' },
     sources: src.sources,
     filter_source: src.filter_source,
     main: file,

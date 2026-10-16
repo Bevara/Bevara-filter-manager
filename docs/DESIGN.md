@@ -613,10 +613,11 @@ A codec declared as `GF_4CC('J','X','L',' ')` compares as `GF_CODECID_JXL`.
 - `version`: a bare version is a **minimum** (it is listed with `maxsize` and
   `maxpriority`); with an operator, a semver range. Versions are generations
   (`1.0.0`), so `2.1` selects nothing today.
-- `IP`: when `condition` is true, an accessor that needs a patent licence
-  (`licence_required`) is excluded where it applies — everywhere, or in the
-  `georestrictions` territories that contain `geocode`; `license` lists the
-  accepted SPDX licences.
+- `IP`: when `condition` is true, an accessor whose `patents.status` is
+  `licence-required` or `under-review` is excluded where it applies —
+  everywhere, or in the `patents.regions` that contain `geocode` — and one
+  that declares no status is excluded too; `license` lists the accepted SPDX
+  licences.
 - `projectname`: one of `projects`, derived from the static libraries in `lib/`
   (`libavcodec.a` ⇒ ffmpeg); every accessor is also `gpac`. Compared without a
   `lib` prefix.

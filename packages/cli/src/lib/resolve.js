@@ -5,7 +5,7 @@ import semver from 'semver';
 import { CliError, log, color } from './ui.js';
 import { RegistryError } from './registry-client.js';
 import { verifyRecord, keyIdOf } from './sig.js';
-import { shortName } from './manifest.js';
+import { shortName, patentNotice } from './manifest.js';
 
 // Parses "theora", "theora@^1.2", "theora@1.0.0", "theora@latest".
 export function parseSpec(spec) {
@@ -144,10 +144,13 @@ export async function installResolved(client, project, chosen, { registry, quiet
       license: doc.license, dependencies: doc.dependencies ?? {}, signature,
       ...(doc.kind === 'runtime' ? { kind: 'runtime' } : doc.kind === 'tags' ? { kind: 'tags', files: (doc.dist.files ?? []).map((f) => ({ file: f.file, integrity: f.integrity })) } : { using: doc.using ?? [] }),
       ...(doc.emsdk ? { emsdk: doc.emsdk } : {}),
+      patents: doc.patents ?? null,
     };
     if (packument?.deprecated && !quiet) log.warn(`${name} is deprecated: ${packument.deprecated}`);
     if (doc.deprecated && !quiet) log.warn(`${name}@${version} is deprecated: ${doc.deprecated}`);
-    if (doc.licence_required && !quiet) log.warn(`${name}@${version} requires a licence (${doc.license ?? 'see filter documentation'})`);
+    // Any patent status is installed; the restricted ones are announced.
+    if (patentNotice(doc.patents) && !quiet) log.warn(`${name}@${version}: ${patentNotice(doc.patents)}`);
+    else if (!doc.patents && !quiet) log.warn(`${name}@${version} does not declare its patent status`);
   }
   // Drop lock entries (and files) for filters nobody references any more.
   for (const name of Object.keys(project.lock.filters)) {

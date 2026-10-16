@@ -596,7 +596,7 @@ describe('runtimes (solvers) as packages', () => {
 describe('tag scripts (kind "tags")', () => {
   let reg, root, bob;
   const scripts = { 'universal-img_1.js': 'customElements.define("universal-img_1")', 'universal-audio_1.js': 'customElements.define("universal-audio_1")' };
-  const tagsManifest = (over = {}) => ({ name: 'universal-tags', version: '1.0.0', abi: 1, kind: 'tags', description: 'Universal tags', license: 'MIT', tags: Object.keys(scripts), ...over });
+  const tagsManifest = (over = {}) => ({ name: 'universal-tags', version: '1.0.0', abi: 1, kind: 'tags', description: 'Universal tags', license: 'MIT', patents: { status: 'royalty-free' }, tags: Object.keys(scripts), ...over });
   const sha = (b) => createHash('sha256').update(b).digest('hex');
   const publishTags = (token, m = tagsManifest(), { tamper = false } = {}) => publish(reg.api, token, m, {
     wasm: null, extra: Object.fromEntries(Object.entries(scripts).map(([f, t]) => [f, Buffer.from(t)])),
@@ -635,5 +635,37 @@ describe('tag scripts (kind "tags")', () => {
     assert.match(clash.data.error, /universal-img/);
     const bad = await publish(reg.api, bob, tagsManifest({ version: '1.0.1', tags: ['universal-img_1.js', 'universal-video_2.js'] }), { wasm: null });
     assert.equal(bad.status, 400);
+  });
+});
+
+describe('patent status', () => {
+  let reg, token;
+  before(async () => { reg = await startRegistry(); token = await signup(reg.api, 'root'); });
+  after(() => reg.close());
+
+  test('every status is accepted and served; the restricted ones are announced', async () => {
+    const r = await publish(reg.api, token, manifest({ name: 'hevcdec', filters: ['hevcdec'], patents: { status: 'licence-required', note: 'HEVC patent pools', regions: ['US', 'JP'] } }));
+    assert.equal(r.status, 201, JSON.stringify(r.data));
+    assert.ok(r.data.warnings.some((w) => /a patent licence may be required to use it in US, JP \(HEVC patent pools\)/.test(w)));
+    for (const status of ['royalty-free', 'expired', 'under-review']) {
+      assert.equal((await publish(reg.api, token, manifest({ name: `p-${status}`, filters: [`p${status}`], patents: { status } }))).status, 201);
+    }
+    const got = await reg.api('GET', '/accessors/hevcdec_1.wasm');
+    assert.equal(got.status, 200);
+    assert.equal(got.headers.get('x-bevara-patents'), 'licence-required');
+    assert.match(got.headers.get('x-bevara-patents-notice'), /in US, JP/);
+    assert.match(got.headers.get('access-control-expose-headers'), /x-bevara-patents/);
+    assert.equal((await reg.api('GET', '/accessors/p-royalty-free_1.wasm')).headers.get('x-bevara-patents-notice'), null);
+    const { data } = await reg.api('GET', '/accessors/index.json');
+    assert.deepEqual(data.filters.find((f) => f.name === 'bevara:hevcdec').patents.regions, ['US', 'JP']);
+  });
+
+  test('a filter must state its status; the old flags are refused', async () => {
+    const none = await publish(reg.api, token, manifest({ name: 'nostatus', filters: ['nostatus'], patents: undefined }));
+    assert.equal(none.status, 400);
+    assert.ok(none.data.errors.some((e) => /"patents" must state/.test(e)));
+    const old = await publish(reg.api, token, manifest({ name: 'oldflag', filters: ['oldflag'], licence_required: true }));
+    assert.equal(old.status, 400);
+    assert.ok(old.data.errors.some((e) => /replaced by "patents"/.test(e)));
   });
 });

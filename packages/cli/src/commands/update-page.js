@@ -1,3 +1,4 @@
+import { patentNotice } from '../lib/manifest.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { log, color, table, CliError } from '../lib/ui.js';
@@ -184,6 +185,11 @@ export async function run({ args, opts }) {
       const { tag, srcAttr, line, src, info, element, pipeline } = p;
       const using = pipeline ? (shared ?? pipeline.using) : info.using;
       const withList = pipeline ? (shared ? pipeline.bySolver.get(shared).with : pipeline.with) : info.with;
+      // The page will load these: their restricted patent statuses are said here.
+      for (const m of withList) {
+        const e = index?.filters?.find((f) => f.file === `${m}.wasm`);
+        if (patentNotice(e?.patents)) report.warnings.push(`line ${line}: ${m}: ${patentNotice(e.patents)}`);
+      }
       const is = `universal-${element}_1`;
       needTags.add(element);
 

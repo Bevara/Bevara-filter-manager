@@ -126,6 +126,17 @@ record adds `tagsSha256: {script: sha256}`. Each script is served at
 `version`, `file`, `url`, `integrity`, `size`). `"extends"` maps a script to
 the tag it builds on.
 
+## Patent status
+
+Every package carries `patents: {status, note?, regions?, checked?}` (status:
+`royalty-free`, `expired`, `licence-required`, `under-review`), returned by
+`/filters`, `/accessors/index.json` (filters, runtimes, tags) and the version
+documents. Every file served under `/accessors/` carries `X-Bevara-Patents:
+<status>` (`undeclared` for packages published before the field) and, for the
+two restricted statuses, `X-Bevara-Patents-Notice: <sentence for users>`;
+both are exposed to cross-origin pages. Publishing a restricted status
+succeeds with a warning saying what users will be told.
+
 ## Selection (no auth, CORS `*`)
 Capability-driven selection (paper, Section 5; DESIGN.md D13): every accessor
 whose declared inputs accept the query's, under side conditions.
@@ -149,7 +160,7 @@ Properties and values take GPAC's names, with or without prefix
 `maxsize` is bytes or `"200kB"`, `"1.5MB"`.
 
 Answer: `{ query, total, matches: [{ name, version, file, url, filter, priority,
-size, brSize, projects, language, license, licence_required, using, accepts,
+size, brSize, projects, language, license, patents, using, accepts,
 produces }], excluded: [{ name, filter, reason }], uncharacterised: [name] }` —
 `matches` most preferred first (priority, then size); `excluded` fit the
 capabilities but fail a side condition; `uncharacterised` were published

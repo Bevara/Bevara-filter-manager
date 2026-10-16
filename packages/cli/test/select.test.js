@@ -18,29 +18,29 @@ maxpriority : 50`;
 const cap = (property, format, extra = {}) => ({ property, format, ...extra });
 const RAW_IN = [cap('GF_PROP_PID_STREAM_TYPE', 'GF_STREAM_VISUAL'), cap('GF_PROP_PID_CODECID', 'GF_CODECID_RAW')];
 const INDEX = [
-  { name: 'bevara:ffmpeg-hevc', version: '1.0.0', file: 'ffmpeg-hevc_1.wasm', size: 900000, projects: ['gpac', 'ffmpeg'], license: 'LGPL-2.1-or-later', caps: [
+  { name: 'bevara:ffmpeg-hevc', version: '1.0.0', file: 'ffmpeg-hevc_1.wasm', size: 900000, projects: ['gpac', 'ffmpeg'], license: 'LGPL-2.1-or-later', patents: { status: 'royalty-free' }, caps: [
     { filter: 'ffdec-hevc', priority: 128, bundles: [{ inputs: [cap('GF_PROP_PID_STREAM_TYPE', 'GF_STREAM_VISUAL'), cap('GF_PROP_PID_CODECID', 'GF_CODECID_RAW', { excluded: true })], outputs: [cap('GF_PROP_PID_CODECID', 'GF_CODECID_RAW')] }],
       runtime: { outputs: [cap('GF_PROP_PID_PIXFMT', 'GF_PIXEL_YUV', { declared: true })] } },
     { filter: 'ffsws-hevc', priority: 0, bundles: [{ inputs: RAW_IN, outputs: RAW_IN }] },
   ] },
-  { name: 'bevara:ffmpeg-x264', version: '1.0.0', file: 'ffmpeg-x264_1.wasm', size: 2000000, projects: ['gpac', 'ffmpeg', 'libx264'], licence_required: true, caps: [
+  { name: 'bevara:ffmpeg-x264', version: '1.0.0', file: 'ffmpeg-x264_1.wasm', size: 2000000, projects: ['gpac', 'ffmpeg', 'libx264'], patents: { status: 'licence-required', note: 'H.264' }, caps: [
     { filter: 'ffenc', priority: 128, bundles: [{ inputs: RAW_IN, outputs: [cap('GF_PROP_PID_CODECID', 'GF_CODECID_AVC')] }] },
   ] },
-  { name: 'bevara:libpng', version: '2.0.0', file: 'libpng_1.wasm', size: 120000, projects: ['gpac', 'libpng'], license: 'Zlib', caps: [
+  { name: 'bevara:libpng', version: '2.0.0', file: 'libpng_1.wasm', size: 120000, projects: ['gpac', 'libpng'], license: 'Zlib', patents: { status: 'royalty-free' }, caps: [
     { filter: 'encpng', priority: 0, bundles: [{ inputs: RAW_IN, outputs: [cap('GF_PROP_PID_CODECID', 'GF_CODECID_PNG')] }] },
   ] },
-  { name: 'bevara:libx264', version: '1.0.0', file: 'libx264_1.wasm', size: 1500000, projects: ['gpac', 'libx264'], licence_required: true, georestrictions: ['US'], caps: [
+  { name: 'bevara:libx264', version: '1.0.0', file: 'libx264_1.wasm', size: 1500000, projects: ['gpac', 'libx264'], patents: { status: 'licence-required', regions: ['US'] }, caps: [
     { filter: 'x264enc', priority: 0, bundles: [{ inputs: [...RAW_IN, cap('GF_PROP_PID_PIXFMT', 'GF_PIXEL_YUV')], outputs: [cap('GF_PROP_PID_CODECID', 'GF_CODECID_AVC')] }] },
   ] },
-  { name: 'bevara:libjxl', version: '1.0.0', file: 'libjxl_1.wasm', size: 600000, projects: ['gpac', 'libjxl'], caps: [
+  { name: 'bevara:libjxl', version: '1.0.0', file: 'libjxl_1.wasm', size: 600000, projects: ['gpac', 'libjxl'], patents: { status: 'royalty-free' }, caps: [
     { filter: 'jxldec', priority: 0, bundles: [{ inputs: [cap('GF_PROP_PID_STREAM_TYPE', 'GF_STREAM_VISUAL'), cap('GF_PROP_PID_CODECID', "GF_4CC('J','X','L',' ')")], outputs: [cap('GF_PROP_PID_CODECID', 'GF_CODECID_RAW')] }],
       runtime: { outputs: [cap('GF_PROP_PID_PIXFMT', 'GF_PIXEL_RGB'), cap('GF_PROP_PID_PIXFMT', 'GF_PIXEL_RGBA', { declared: true })] } },
     { filter: 'rfjxl', priority: 0, bundles: [{ inputs: [cap('GF_PROP_PID_STREAM_TYPE', 'GF_STREAM_FILE'), cap('GF_PROP_PID_FILE_EXT', '"jxl"'), cap('GF_PROP_PID_MIME', '"image/jxl"')], outputs: [] }] },
   ] },
-  { name: 'bevara:ogg', version: '1.0.0', file: 'ogg_1.wasm', size: 200000, caps: [
+  { name: 'bevara:ogg', version: '1.0.0', file: 'ogg_1.wasm', size: 200000, patents: { status: 'royalty-free' }, caps: [
     { filter: 'oggdmx', priority: 0, bundles: [{ inputs: [cap('GF_PROP_PID_STREAM_TYPE', 'GF_STREAM_FILE'), cap('GF_PROP_PID_FILE_EXT', '"oga|ogg|ogv"')], outputs: [] }] },
   ] },
-  { name: 'bevara:old', version: '1.0.0', file: 'old_1.wasm', size: 1 },
+  { name: 'bevara:old', version: '1.0.0', file: 'old_1.wasm', size: 1, patents: { status: 'royalty-free' } },
 ];
 
 const names = (r) => r.matches.map((m) => m.filter);

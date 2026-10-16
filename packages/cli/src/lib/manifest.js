@@ -21,6 +21,22 @@ export const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-
 // an accessor file may not be (libOpenVVC_1.wasm).
 export const MODULE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 export const KINDS = ['filter', 'runtime', 'tags'];
+
+/* Patent status of what a module implements. Every status is published and
+ * served; the two restricted ones are announced to whoever installs, selects
+ * or serves the module (CLI messages, index, HTTP headers). */
+export const PATENT_STATUSES = ['royalty-free', 'expired', 'licence-required', 'under-review'];
+export const isRestricted = (patents) => patents?.status === 'licence-required' || patents?.status === 'under-review';
+
+/* The sentence an end user reads about a restricted module, or null. */
+export function patentNotice(patents) {
+  if (!isRestricted(patents)) return null;
+  const where = patents.regions?.length ? ` in ${patents.regions.join(', ')}` : '';
+  const what = patents.status === 'licence-required'
+    ? `a patent licence may be required to use it${where}`
+    : `its patent status is under review${where}: a licence may be required`;
+  return `${what}${patents.note ? ` (${patents.note})` : ''}`;
+}
 // A tag script: the definition of a universal element, <name>_<generation>.js.
 export const TAG_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9.-]*(?:_[A-Za-z0-9.-]+)*_\d+\.js$/;
 export const SUPPORT_VALUES = ['image', 'audio', 'video', 'canvas', 'text', 'subtitle', 'container', 'other'];
@@ -89,8 +105,16 @@ export function validateManifest(m, { forPublish = false } = {}) {
   } else if (forPublish && !runtime && !tags) errors.push('"using" must list the runtimes (solvers) the filter links against, as pages name them: ["solver_minimal_1"], ["solver_1"] - each must be published on the registry');
   if (m.license !== undefined && !isStr(m.license)) errors.push('"license" must be a string (SPDX identifier)');
   if (m.license === undefined && forPublish) warnings.push('no licence: add a LICENCE file (an "SPDX-License-Identifier:" line makes it exact)');
-  if (m.licence_required !== undefined && typeof m.licence_required !== 'boolean') errors.push('"licence_required" must be a boolean');
-  if (m.georestrictions !== undefined && typeof m.georestrictions !== 'boolean' && !isStrArray(m.georestrictions)) errors.push('"georestrictions" must be false or an array of ISO country codes');
+  // Patent status: any status is published and served, but users are told.
+  if (m.licence_required !== undefined || m.georestrictions !== undefined) errors.push('"licence_required" and "georestrictions" are replaced by "patents": {"status": "royalty-free" | "expired" | "licence-required" | "under-review", "note", "regions", "checked"}');
+  if (m.patents === undefined) { if (forPublish) errors.push(`"patents" must state the patent status of what the module implements: {"status": one of ${PATENT_STATUSES.join(', ')}}`); }
+  else if (!m.patents || typeof m.patents !== 'object' || Array.isArray(m.patents)) errors.push('"patents" must be an object: {"status": ..., "note": ..., "regions": [...], "checked": "YYYY-MM-DD"}');
+  else {
+    if (!PATENT_STATUSES.includes(m.patents.status)) errors.push(`"patents.status" must be one of ${PATENT_STATUSES.join(', ')} (got ${JSON.stringify(m.patents.status)})`);
+    if (m.patents.note !== undefined && !isStr(m.patents.note)) errors.push('"patents.note" must be a string (what is claimed, by whom)');
+    if (m.patents.regions !== undefined && !(isStrArray(m.patents.regions) && m.patents.regions.every((r) => /^[A-Z]{2}$/.test(r)))) errors.push('"patents.regions" must list ISO 3166 country codes where the restriction applies (["US", "JP"]); absent means everywhere');
+    if (m.patents.checked !== undefined && !(isStr(m.patents.checked) && /^\d{4}-\d{2}-\d{2}$/.test(m.patents.checked))) errors.push('"patents.checked" must be the date of the review, YYYY-MM-DD');
+  }
   if (m.priority !== undefined && !(Number.isInteger(m.priority) && m.priority >= 0 && m.priority <= 255)) errors.push('"priority" must be an integer in [0, 255] (lower = preferred)');
   if (m.projects !== undefined && !isStrArray(m.projects)) errors.push('"projects" must list the upstream projects the module is built from (["ffmpeg"])');
   if (m.project !== undefined && !isStr(m.project)) errors.push('"project" must be a string');
@@ -157,15 +181,13 @@ export function normalizeManifest(m) {
     support: [],
     formats: [],
     keywords: [],
-    licence_required: false,
-    georestrictions: false,
     dependencies: {},
     ...m,
   };
 }
 
 // Fields that are meaningful once published (everything a consumer needs).
-export const PUBLIC_FIELDS = ['name', 'version', 'abi', 'kind', 'builtins', 'tags', 'extends', 'emsdk', 'module', 'description', 'filters', 'support', 'formats', 'extension', 'using', 'keywords', 'license', 'licence_required', 'georestrictions', 'priority', 'caps', 'projects', 'language', 'inputs', 'outputs', 'sources', 'homepage', 'filter_source', 'dependencies', 'help', 'author'];
+export const PUBLIC_FIELDS = ['name', 'version', 'abi', 'kind', 'builtins', 'tags', 'extends', 'emsdk', 'module', 'description', 'filters', 'support', 'formats', 'extension', 'using', 'keywords', 'license', 'patents', 'priority', 'caps', 'projects', 'language', 'inputs', 'outputs', 'sources', 'homepage', 'filter_source', 'dependencies', 'help', 'author'];
 
 export function publicManifest(m) {
   const out = {};
