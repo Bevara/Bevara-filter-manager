@@ -63,7 +63,9 @@ export async function run({ args, opts }) {
         combinations = opts.with?.length ? opts.with.map((w) => w.split(/[;,\s]+/).filter(Boolean)) : [info.decodeWith];
         if (!combinations[0]?.length) throw new CliError('format not identified, nothing to measure');
       } else {
-        combinations = await registryCombinations(file, index, opts);
+        let kind;
+        ({ combinations, kind } = await registryCombinations(file, index, opts));
+        if (kind) info.kind = kind;
         dir = await fetchModules(combinations, index, { client, registry, solver: opts.solver });
       }
     } catch (e) {
