@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { log, color, table, formatBytes, CliError } from '../lib/ui.js';
 import { Project, clientFor } from '../lib/ctx.js';
-import { registryCombinations, fetchModules } from '../lib/run-prep.js';
+import { registryCombinations, fetchModules, mediaKind } from '../lib/run-prep.js';
 import { closeMediaInfo } from '../lib/mediainfo.js';
 import { runSession, requireSolver, missingModules, verdict, median, solverForCombination } from '../lib/runner.js';
 import { accessorsDirFor, probeFile } from './test.js';
@@ -62,6 +62,7 @@ export async function run({ args, opts }) {
       if (local) {
         combinations = opts.with?.length ? opts.with.map((w) => w.split(/[;,\s]+/).filter(Boolean)) : [info.decodeWith];
         if (!combinations[0]?.length) throw new CliError('format not identified, nothing to measure');
+        info.kind = (await mediaKind(file)) ?? info.kind;
       } else {
         let kind;
         ({ combinations, kind } = await registryCombinations(file, index, opts));

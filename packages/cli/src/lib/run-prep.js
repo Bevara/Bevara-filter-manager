@@ -20,16 +20,23 @@ import { locateSources, deployFiles } from './page-files.js';
 export const cacheDir = (registry, env = process.env) =>
   path.join(env.BEVARA_CACHE ?? path.join(os.homedir(), '.bevara', 'cache'), new URL(registry).host.replace(/[^A-Za-z0-9.-]/g, '_'));
 
+/* The kind of media a file decodes to (video, image, audio), which names the
+ * raw sink: the element a page would use for its MediaInfo tracks, or null. */
+export async function mediaKind(file, tracks, match) {
+  tracks ??= await mediaTracks(file, await readSource(file));
+  return KIND_OF_ELEMENT[elementFor(tracks, match)] ?? null;
+}
+const KIND_OF_ELEMENT = { canvas: 'video', video: 'video', img: 'image', audio: 'audio' };
+
 /* The combinations to run on a file, from the registry: -W as given, else
- * the accessors that decode its streams; and the kind of media they output
- * (video, image, audio), which names the raw sink. Throws a CliError saying
- * why there is nothing to run. */
+ * the accessors that decode its streams; and the kind of media they output.
+ * Throws a CliError saying why there is nothing to run. */
 export async function registryCombinations(file, index, opts) {
   const tracks = await mediaTracks(file, await readSource(file));
   const needs = needsOf(tracks, { ext: extensionOf(file) });
   // solver_1 first: it reports the per-filter statistics the reports show.
   const match = resolvePipeline(needs, index, { prefer: opts.solver ?? 'solver_1' });
-  const kind = KIND_OF_ELEMENT[elementFor(tracks, match)] ?? null;
+  const kind = await mediaKind(file, tracks, match);
   if (opts.with?.length) return { combinations: opts.with.map((w) => w.split(/[;,\s]+/).filter(Boolean)), kind };
   if (match.missing.length) throw new CliError(`nothing on the registry can ${match.missing.map(describeNeed).join(', ')}`, { hint: 'bevara probe shows what the file holds; -W "a_1;b_1" names a combination to try' });
   if (match.noRuntimes) throw new CliError('the registry publishes no runtime (solver) to run the accessors with');
@@ -38,9 +45,6 @@ export async function registryCombinations(file, index, opts) {
   if (!match.with.length) throw new CliError('format not identified: nothing to run', { hint: 'bevara probe shows what the file holds' });
   return { combinations: [match.with], kind };
 }
-
-// The element a page would use, as the media kind of the raw sink.
-const KIND_OF_ELEMENT = { canvas: 'video', video: 'video', img: 'image', audio: 'audio' };
 
 /* Downloads the modules of the combinations, and the runtimes they share,
  * into the cache; writes next to each accessor its "using", which the run

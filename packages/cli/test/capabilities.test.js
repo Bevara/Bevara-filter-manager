@@ -242,3 +242,41 @@ describe('the priority of the filter doing the work', async () => {
     assert.deepEqual(resolvePipeline(needs, index).with, ['libflac_1']);
   });
 });
+
+describe('an image file is read and decoded by one accessor', async () => {
+  const { needsOf, resolvePipeline } = await import('../src/lib/capabilities.js');
+  const raw = [{ property: 'GF_PROP_PID_CODECID', format: 'GF_CODECID_RAW' }];
+  const decoder = (filter) => [{ filter, priority: 0, bundles: [{ inputs: [], outputs: raw }] }];
+  const index = {
+    filters: [
+      { name: 'bevara:libtiff', file: 'libtiff_1.wasm', formats: ['tif', 'tiff'], extension: { tif: 'img', tiff: 'img' }, using: ['solver_1'], caps: decoder('tiffdec') },
+      { name: 'bevara:qdbmp', file: 'qdbmp_1.wasm', formats: ['Bitmap'], extension: { bmp: 'img' }, using: ['solver_1'], caps: decoder('QDBMP') },
+      { name: 'bevara:libraw', file: 'libraw_1.wasm', formats: ['raw', 'dng'], extension: { raw: 'img', dng: 'img' }, using: ['solver_1'], caps: decoder('rawdec') },
+      { name: 'bevara:libjpeg', file: 'libjpeg_1.wasm', formats: ['JPEG'], using: ['solver_1'], caps: decoder('jpegdec') },
+      { name: 'bevara:isobmff', file: 'isobmff_1.wasm', formats: ['MPEG-4'], extension: { mp4: 'video' }, using: ['solver_1'], caps: [{ filter: 'mp4dmx', priority: 0, bundles: [{ inputs: [], outputs: [] }] }] },
+      { name: 'bevara:libutvideo', file: 'libutvideo_1.wasm', formats: ['ULY0', 'ULY2'], using: ['solver_1'], caps: decoder('utvideodec') },
+      { name: 'bevara:avidmx', file: 'avidmx_1.wasm', formats: ['AVI'], using: ['solver_1'] },
+    ],
+    runtimes: [{ module: 'solver_1' }],
+  };
+  const pipe = (general, streams, ext) => resolvePipeline(needsOf([{ '@type': 'General', Format: general }, ...streams], { ext }), index);
+
+  test('the LZW of a TIFF is libtiff\'s, not a missing decoder', () => {
+    const r = pipe('TIFF', [{ '@type': 'Image', Format: 'LZW' }], 'tif');
+    assert.deepEqual(r.missing, []);
+    assert.deepEqual(r.with, ['libtiff_1']);
+  });
+
+  test('the "Raw" of a BMP goes to qdbmp, not libraw', () => {
+    assert.deepEqual(pipe('Bitmap', [{ '@type': 'Image', Format: 'Raw' }], 'bmp').with, ['qdbmp_1']);
+  });
+
+  test('a container that does not decode leaves its image streams to decoders', () => {
+    assert.deepEqual(pipe('MPEG-4', [{ '@type': 'Image', Format: 'JPEG' }], 'mp4').with, ['isobmff_1', 'libjpeg_1']);
+  });
+
+  test('a codec ID declared in "Format" names the decoder MediaInfo calls YUV', () => {
+    const r = pipe('AVI', [{ '@type': 'Video', Format: 'YUV', CodecID: 'ULY0' }], 'avi');
+    assert.deepEqual(r.with, ['avidmx_1', 'libutvideo_1']);
+  });
+});

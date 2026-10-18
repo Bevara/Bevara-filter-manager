@@ -40,7 +40,7 @@ export function needsOf(tracks, { ext = '' } = {}) {
     // extension can say which accessor plays it.
     if (!s.Format) { needs.push({ role: 'decode', type, format: null, unidentified: true, ext, byExtension: true }); continue; }
     if (needs.some((n) => n.role === 'decode' && key(n.format) === key(s.Format))) continue;
-    needs.push({ role: 'decode', type, format: s.Format, profile: s.Format_Profile, ext, byExtension: elementary });
+    needs.push({ role: 'decode', type, format: s.Format, codec: s.CodecID, profile: s.Format_Profile, ext, byExtension: elementary });
   }
   return needs;
 }
@@ -59,10 +59,13 @@ export function describeNeed(n) {
 }
 
 /* How an accessor answers a need: 'format' (it declares the format MediaInfo
- * names), 'extension' (only the file's extension matches), or false. */
+ * names, or the stream's codec ID - MediaInfo calls UtVideo "YUV", its codec
+ * ID ULY0 tells it apart), 'extension' (only the file's extension matches),
+ * or false. */
 function fits(entry, need) {
   if (need.role === 'encode') return entry.file === `${need.module}.wasm` ? 'format' : false;
-  if (need.format && (entry.formats ?? []).some((f) => key(f) === key(need.format))) return 'format';
+  const declares = (v) => v && (entry.formats ?? []).some((f) => key(f) === key(v));
+  if (declares(need.format) || declares(need.codec)) return 'format';
   if (!need.byExtension || !need.ext) return false;
   // Before "extension" was published, a manifest without "Format" had its
   // extension keys published as "formats": they still name extensions.
@@ -83,9 +86,11 @@ export const KNOWN_SOLVERS = ['solver_minimal_1', 'solver_1'];
  * accessor's filter doing the work - for a decode, the one that outputs raw
  * media (ffmpeg's ffdec at 128, not its reframer at 0); for a demultiplex,
  * the one that reads a file. Without published caps, the accessor's own. */
+const outputsRaw = (c) => (c.bundles ?? []).some((b) => (b.outputs ?? []).some((o) => o.property === 'GF_PROP_PID_CODECID' && !o.excluded && o.format === 'GF_CODECID_RAW'));
+const decodes = (entry) => Array.isArray(entry.caps) && entry.caps.some(outputsRaw);
+
 function priorityFor(entry, need) {
   const caps = Array.isArray(entry.caps) ? entry.caps : [];
-  const outputsRaw = (c) => (c.bundles ?? []).some((b) => (b.outputs ?? []).some((o) => o.property === 'GF_PROP_PID_CODECID' && !o.excluded && o.format === 'GF_CODECID_RAW'));
   const readsFiles = (c) => (c.bundles ?? []).some((b) => (b.inputs ?? []).some((i) => i.property === 'GF_PROP_PID_STREAM_TYPE' && !i.excluded && i.format === 'GF_STREAM_FILE'));
   const doing = caps.filter(need.role === 'decode' ? outputsRaw : need.role === 'demux' || need.role === 'read' ? readsFiles : () => false);
   if (doing.length) return Math.min(...doing.map((c) => c.priority ?? 0));
@@ -109,6 +114,18 @@ export function resolveNeeds(needs, index, { solver } = {}) {
       .sort((a, b) => rank[a.match] - rank[b.match] || prio(a, need) - prio(b, need) || a.module.localeCompare(b.module));
     return { ...need, candidates, chosen: candidates[0] ?? null };
   });
+  /* An image file is read and decoded by one accessor: libtiff takes the LZW,
+   * PackBits or fax strips MediaInfo lists as the image's format, libdds its
+   * DXT blocks, qdbmp its RLE. When the accessor that reads the file outputs
+   * decoded pictures, it answers the image streams - rather than libraw for
+   * the "Raw" of a BMP, or nothing for the LZW of a TIFF. */
+  const reader = resolved.find((n) => (n.role === 'demux' || n.role === 'read') && n.chosen)?.chosen;
+  if (reader && decodes(reader)) {
+    for (const [i, n] of resolved.entries()) {
+      if (n.role !== 'decode' || n.type !== 'image') continue;
+      resolved[i] = { ...n, candidates: [{ ...reader, match: 'container' }, ...n.candidates.filter((c) => c.module !== reader.module)], chosen: { ...reader, match: 'container' } };
+    }
+  }
   const withList = [];
   for (const n of resolved) if (n.chosen && !withList.includes(n.chosen.module)) withList.push(n.chosen.module);
   // Needs MediaInfo named but only an extension answered: what tells a good
