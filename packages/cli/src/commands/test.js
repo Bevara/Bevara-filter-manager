@@ -92,11 +92,11 @@ export async function run({ args, opts }) {
       if (local) {
         combinations = opts.with?.length ? opts.with.map((w) => w.split(/[;,\s]+/).filter(Boolean)) : [info.decodeWith];
         if (!combinations[0]?.length) throw new CliError('no pipeline to test (format not identified)');
-        info.kind = (await mediaKind(file)) ?? info.kind;
+        info.kind ??= await mediaKind(file);
       } else {
         let kind;
         ({ combinations, kind } = await registryCombinations(file, index, opts));
-        if (kind) info.kind = kind;
+        info.kind ??= kind;
         dir = await fetchModules(combinations, index, { client, registry, solver: opts.solver });
       }
     } catch (e) {

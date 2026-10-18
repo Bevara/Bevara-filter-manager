@@ -20,10 +20,16 @@ import { locateSources, deployFiles } from './page-files.js';
 export const cacheDir = (registry, env = process.env) =>
   path.join(env.BEVARA_CACHE ?? path.join(os.homedir(), '.bevara', 'cache'), new URL(registry).host.replace(/[^A-Za-z0-9.-]/g, '_'));
 
-/* The kind of media a file decodes to (video, image, audio), which names the
- * raw sink: the element a page would use for its MediaInfo tracks, or null. */
+/* The kind of media a file decodes to (video, image, audio), for files the
+ * built-in table does not know: it names the raw sink. Video first, then
+ * audio - the cover of an MP3 is an Image track - then image; failing tracks,
+ * the element the matching accessor's "extension" gives. */
 export async function mediaKind(file, tracks, match) {
   tracks ??= await mediaTracks(file, await readSource(file));
+  const has = (t) => tracks?.some((x) => x['@type'] === t);
+  if (has('Video')) return 'video';
+  if (has('Audio')) return 'audio';
+  if (has('Image')) return 'image';
   return KIND_OF_ELEMENT[elementFor(tracks, match)] ?? null;
 }
 const KIND_OF_ELEMENT = { canvas: 'video', video: 'video', img: 'image', audio: 'audio' };
