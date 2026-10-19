@@ -43,6 +43,7 @@ these requirements, and the alternatives rejected, are in
 | [R28](#r28) | Tag scripts are packages (kind "tags"), listed by `bevara tags`; update-page writes them so the page works as is | 2026-10-16 |
 | [R29](#r29) | Only filters free of patent and licence obstacles to worldwide deployment are published on the default registry | 2026-10-16 |
 | [R30](#r30) | Every package states its patent status; any is distributed, the restricted ones are announced to users | 2026-10-16 |
+| [R31](#r31) | `bevara preserve` packages a file with its page, tag script, solver and accessors into one MP4 (MMSys'27 §5.3) | 2026-10-19 |
 
 ---
 
@@ -411,3 +412,19 @@ status. All 89 filter repositories, both solvers and the tags package declare it
 - Where: `PATENT_STATUSES`, `patentNotice` in `manifest.js`; `patentHeaders` and publish in `registry/src/app.js`; the CLI commands
 - Checked by: `registry.test.js` "patent status", `cli/test/select.test.js` (IP condition by region), e2e
 
+### R31
+**A media file can be preserved with what plays it, in one MP4** (2026-10-19),
+as §5.3 of the MMSys'27 paper describes ("Encapsulation in a Container").
+`bevara preserve <file>` probes the file, chooses its pipeline on the registry
+as `update-page` does, builds a page showing it, and writes with mp4box.js an
+ISOBMFF file laid out as `MP4Box -set-meta html -add-item … -set-primary 1`
+lays it out: `ftyp`; a `meta` box with the `html` handler whose `pitm` is the
+page and whose `iinf`/`iloc` name each item (its path relative to the page)
+and locate it; the `mdat` holding the page, the tag script, the solver
+(`.js`, `.wasm`), the accessors' Wasm bytecode and the media, unchanged. The
+package is read back with mp4box.js before the command succeeds. `--viewer`
+writes beside it the service worker that opens it in a browser (GPAC's MP4
+Service Worker, extended) and a page that installs it.
+
+- Where: `cli/src/commands/preserve.js`, `cli/src/lib/mp4-package.js`, `cli/templates/preserve/`; `rewritePages` in `update-page.js`
+- Checked by: `cli/test/mp4-package.test.js`; JXL, PNG, Ogg Vorbis and Ogg Theora packages opened in Chromium through the service worker

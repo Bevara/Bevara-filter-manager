@@ -86,6 +86,54 @@ export async function run({ args, opts }) {
     try { index = await client.get('/accessors/index.json'); }
     catch (e) { log.warn(`registry unreachable (${e.message}); accessors will not be checked`); }
   }
+  const { reports, allModules } = await rewritePages(args, { index, client, opts });
+  // What was written, for revert-page.
+  if (opts.write) {
+    for (const r of reports) {
+      const touched = r.changed || (r.files ?? []).some((f) => f.status === 'added' || f.status === 'replaced');
+      if (touched) recordUpdate(r.file, r.original, r.updated, r.files ?? []);
+    }
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify(reports.map(({ updated, preview, dir, original, ...r }) => r), null, 2));
+    return;
+  }
+
+  await closeMediaInfo();
+  for (const r of reports) print(r, opts, registry);
+
+  const touched = reports.filter((r) => r.changed);
+  const copied = reports.flatMap((r) => (r.files ?? []).filter((f) => f.status === 'added' || f.status === 'replaced'));
+  const parts = [touched.length && `${touched.length} page${touched.length === 1 ? '' : 's'}`, copied.length && `${copied.length} file${copied.length === 1 ? '' : 's'} next to ${touched.length || reports.length === 1 ? 'it' : 'them'}`].filter(Boolean);
+  if (!parts.length) log.info('nothing to change');
+  else if (opts.write) log.ok(`updated ${parts.join(', ')}`);
+  else log.info(color.dim(`${parts.join(' and ')} to update: run again with ${color.bold('--write')} to apply`));
+
+  if (opts.install) {
+    if (!index) throw new CliError('--install needs the registry', { hint: 'drop --offline, or check `bevara ping`' });
+    const names = [...allModules].map((m) => index.filters.find((f) => f.file === `${m}.wasm`)?.name).filter(Boolean);
+    if (!names.length) throw new CliError('none of the required accessors are published on this registry');
+    if (!project.manifestFile) throw new CliError('no bevara.json here', { hint: 'run `bevara init --site` first' });
+    log.step(`installing ${names.length} accessors`);
+    const roots = { ...(project.manifest.dependencies ?? {}) };
+    for (const n of names) roots[n] ??= 'latest';
+    const chosen = await resolveTree(client, roots, { lock: project.lock.filters });
+    project.manifest.dependencies ??= {};
+    for (const n of names) project.manifest.dependencies[n] ??= `^${chosen.get(n).version}`;
+    project.saveManifest();
+    const installed = await installResolved(client, project, chosen, { registry });
+    log.ok(`${chosen.size} filters in ${path.relative(process.cwd(), project.accessorsDir) || '.'}/ (${installed.length} downloaded)`);
+  }
+}
+
+/**
+ * Rewrites the pages and, unless --no-files, puts what they load next to them
+ * (written only with opts.write). Shared with preserve, which builds a page
+ * around one file and packages it.
+ * @returns {{ reports: object[], allModules: Set<string> }}
+ */
+export async function rewritePages(args, { index, client, opts }) {
   const extra = (opts.attrs ?? '').split(/[\s;]+/).filter(Boolean);
   const scriptsBase = (opts.scripts ?? 'scripts/').replace(/\/*$/, '/');
 
@@ -239,44 +287,7 @@ export async function run({ args, opts }) {
       r.files = await deployFiles(locateSources(reqs, { index, runtimeDirs }), { client, refresh: opts.refresh, dryRun: !opts.write, onReplace: (dest) => backupBeforeReplace(r.dir, dest) });
     }
   }
-  // What was written, for revert-page.
-  if (opts.write) {
-    for (const r of reports) {
-      const touched = r.changed || (r.files ?? []).some((f) => f.status === 'added' || f.status === 'replaced');
-      if (touched) recordUpdate(r.file, r.original, r.updated, r.files ?? []);
-    }
-  }
-
-  if (opts.json) {
-    console.log(JSON.stringify(reports.map(({ updated, preview, dir, original, ...r }) => r), null, 2));
-    return;
-  }
-
-  await closeMediaInfo();
-  for (const r of reports) print(r, opts, registry);
-
-  const touched = reports.filter((r) => r.changed);
-  const copied = reports.flatMap((r) => (r.files ?? []).filter((f) => f.status === 'added' || f.status === 'replaced'));
-  const parts = [touched.length && `${touched.length} page${touched.length === 1 ? '' : 's'}`, copied.length && `${copied.length} file${copied.length === 1 ? '' : 's'} next to ${touched.length || reports.length === 1 ? 'it' : 'them'}`].filter(Boolean);
-  if (!parts.length) log.info('nothing to change');
-  else if (opts.write) log.ok(`updated ${parts.join(', ')}`);
-  else log.info(color.dim(`${parts.join(' and ')} to update: run again with ${color.bold('--write')} to apply`));
-
-  if (opts.install) {
-    if (!index) throw new CliError('--install needs the registry', { hint: 'drop --offline, or check `bevara ping`' });
-    const names = [...allModules].map((m) => index.filters.find((f) => f.file === `${m}.wasm`)?.name).filter(Boolean);
-    if (!names.length) throw new CliError('none of the required accessors are published on this registry');
-    if (!project.manifestFile) throw new CliError('no bevara.json here', { hint: 'run `bevara init --site` first' });
-    log.step(`installing ${names.length} accessors`);
-    const roots = { ...(project.manifest.dependencies ?? {}) };
-    for (const n of names) roots[n] ??= 'latest';
-    const chosen = await resolveTree(client, roots, { lock: project.lock.filters });
-    project.manifest.dependencies ??= {};
-    for (const n of names) project.manifest.dependencies[n] ??= `^${chosen.get(n).version}`;
-    project.saveManifest();
-    const installed = await installResolved(client, project, chosen, { registry });
-    log.ok(`${chosen.size} filters in ${path.relative(process.cwd(), project.accessorsDir) || '.'}/ (${installed.length} downloaded)`);
-  }
+  return { reports, allModules };
 }
 
 const FILE_MARK = { added: '+', replaced: '↻', present: '=', kept: '!', missing: '✖', failed: '✖' };

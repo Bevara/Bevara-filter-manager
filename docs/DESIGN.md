@@ -633,7 +633,42 @@ them), like `manifest.js`. The registry answers `GET|POST /-/select` (CORS `*`,
 GET with plain parameters for a player); the CLI runs the same function on
 `/accessors/index.json` when the registry predates the endpoint.
 
-## 14. Known limitations
+## 14. Preserving a file: preserve
+
+**D14.1 — The package is the paper's (MMSys'27 §5.3), written with mp4box.js.**
+The layout is the one `MP4Box -set-meta html -add-item … -set-primary 1`
+produces and the MP4 Service Worker reads: `ftyp` (isom, iso2), a file-level
+`meta` box (handler `html`; `pitm` the page; `iloc` v0, one extent per item,
+absolute offsets; `iinf` of `infe` v2 `mime` items carrying the name and MIME
+type), then one `mdat` with the items' bytes. mp4box.js 2.4 parses these boxes
+but writes only `ftyp` and `hdlr`; `mp4-package.js` writes the other payloads
+and lets mp4box.js's generic box writer frame them. Offsets and lengths widen
+to 64 bits, and the `mdat` to a large size, when the file passes 4 GiB.
+- *Consequences*: native MP4Box lists and extracts the items (`MP4Box -info`,
+  `-dump-item`); there is no `moov` - MP4Box writes none for a file of items only.
+
+**D14.2 — The media is an item, byte for byte.**
+The paper's example imports the Ogg into tracks with native MP4Box; mp4box.js
+has no importers, and preservation wants the original anyway. The page shows
+the media item through the universal element, as any page would.
+
+**D14.3 — The page is built by update-page.**
+`preserve` stages `index.html` with the media in the element its kind calls
+for (img, audio, or canvas for video, as in the paper; `--element` overrides),
+and runs `rewritePages` - the core of `update-page` - on it: same probing,
+same registry choice, same files (tag script, solver, accessors), checked
+against their integrity. Items are named by their path relative to the page.
+
+**D14.4 — An extended service worker opens the package.**
+GPAC's `mp4box-sw` finds an item by stripping the characters a request URL
+shares with the .mp4 URL: `out.mp4` asking for `ogg_1.wasm` looks up
+`gg_1.wasm`. `templates/preserve/bevara-sw.js` names items relative to the
+.mp4's directory, finds the package from the requesting client (then the
+Referer), parses it again after the worker restarts, and answers HEAD - the
+player asks a source's type and size first. It is a module worker importing
+mp4box.js's ESM build, which `--viewer` copies beside it.
+
+## 15. Known limitations
 
 - **The registry image has not been built or deployed yet**; the default
   registry answers `503` until it is.

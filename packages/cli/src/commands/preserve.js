@@ -1,0 +1,226 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { log, color, table, formatBytes, CliError } from '../lib/ui.js';
+import { clientFor, Project } from '../lib/ctx.js';
+import { sniff } from '../lib/sniff.js';
+import { readSource } from '../lib/source.js';
+import { mediaTracks, closeMediaInfo } from '../lib/mediainfo.js';
+import { writePackage, readPackage } from '../lib/mp4-package.js';
+import { rewritePages } from './update-page.js';
+
+export const options = {
+  output: { type: 'string', short: 'o' },
+  element: { type: 'string', short: 'e' },
+  attrs: { type: 'string' },
+  runtime: { type: 'string', multiple: true },
+  viewer: { type: 'boolean' },
+  keep: { type: 'boolean' },
+};
+
+export const help = `Preserves a media file with what plays it: the file, the accessors that
+decode it, the solver they link against, the tag script and a page showing it
+are packaged as one ISOBMFF (.mp4) file, readable without the registry (§5.3 of
+the MMSys'27 paper, "Encapsulation in a Container").
+
+The file is probed and its pipeline chosen on the registry as update-page does;
+then, as MP4Box -set-meta html -add-item … -set-primary would, a meta box with
+the "html" handler lists the items - each with its name and MIME type - and
+the bytes go in the mdat: the page (the primary item), the tag script, the
+solver (.js and .wasm), the accessors (Wasm bytecode) and the media file,
+unchanged. The package is read back with mp4box.js before the command ends.
+
+A browser opens the package through a service worker that serves its page in
+place of the file (GPAC's MP4 Service Worker, extended): --viewer writes it next
+to the .mp4, with a page that installs it and opens the package.
+
+  bevara preserve photo.jxl                    photo.bevara.mp4
+  bevara preserve clip.ogv -o clip.mp4 --viewer
+  bevara preserve clip.ogv --element video --attrs "progressive use-webcodec"
+
+Options:
+  -o, --output <file.mp4>  the package (default: <name>.bevara.mp4 here)
+  -e, --element <tag>      img, audio, video or canvas (default: from the media:
+                           img for an image, audio for audio, canvas for video)
+      --attrs "a b"        extra attributes on the element, e.g. "use-webcodec"
+      --runtime <dir>      tag scripts and solvers from this directory first
+                           (repeatable; then the registry)
+      --viewer             write the service worker and an <name>.html that opens
+                           the package with it
+      --keep               keep the staging directory (the unpacked page)
+      --json               machine-readable report`;
+
+const ELEMENTS = new Set(['img', 'audio', 'video', 'canvas']);
+const ELEMENT_FOR = { image: 'img', audio: 'audio', video: 'canvas' };
+const ITEM_TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm' };
+const TEMPLATES = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../templates/preserve');
+
+const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+/* The page of the package: the media in the element that shows it, which
+ * update-page then turns into the universal element. */
+function pageFor(name, element) {
+  const src = escapeHtml(encodeURI(name));
+  const tag = element === 'canvas' ? `<canvas data-url="${src}"></canvas>`
+    : element === 'img' ? `<img src="${src}" alt="${escapeHtml(name)}">`
+      : `<${element} src="${src}" controls></${element}>`;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(name)}</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111; }
+    img, video, canvas { max-width: 100vw; max-height: 100vh; }
+  </style>
+</head>
+<body>
+  ${tag}
+</body>
+</html>
+`;
+}
+
+// The kind of media, as a page shows it: video first, then audio (the cover
+// of an MP3 is an Image track), then image.
+function kindOf(tracks, info) {
+  const has = (t) => tracks?.some((x) => x['@type'] === t);
+  return has('Video') ? 'video' : has('Audio') ? 'audio' : has('Image') ? 'image' : info.kind;
+}
+
+export async function run({ args, opts }) {
+  if (!args.length) throw new CliError('usage: bevara preserve <file...>');
+  if (opts.output && args.length > 1) throw new CliError('--output names one package: preserve one file at a time with it');
+  if (opts.element && !ELEMENTS.has(opts.element)) throw new CliError(`--element ${opts.element}: one of ${[...ELEMENTS].join(', ')}`);
+  const project = Project.load({ required: false });
+  const { registry, client } = clientFor(opts, project);
+  const index = await client.get('/accessors/index.json', { auth: false });
+  const reports = [];
+
+  try {
+    for (const file of args) {
+      if (!fs.existsSync(file) || !fs.statSync(file).isFile()) { log.error(`${file}: not found`); process.exitCode = 1; continue; }
+      try { reports.push(await preserve(file, { opts, index, client, registry })); }
+      catch (e) {
+        if (!(e instanceof CliError)) throw e;
+        log.error(`${file}: ${e.message}`);
+        if (e.hint) console.log(color.dim(`  ${e.hint}`));
+        process.exitCode = 1;
+      }
+    }
+  } finally { await closeMediaInfo(); }
+
+  if (opts.json) console.log(JSON.stringify(reports, null, 2));
+}
+
+async function preserve(file, { opts, index, client, registry }) {
+  const name = path.basename(file);
+  const source = await readSource(path.resolve(file));
+  const info = sniff({ head: source.head, tail: source.tail, name, mime: source.mime, size: source.size });
+  const tracks = await mediaTracks(path.resolve(file), source);
+  const general = tracks?.find((t) => t['@type'] === 'General');
+  const kind = kindOf(tracks, info);
+  const element = opts.element ?? ELEMENT_FOR[kind];
+  if (!element) throw new CliError('the kind of media is not identified: say which element shows it', { hint: '--element img|audio|video|canvas' });
+
+  // The page and the media, staged as the page will see them.
+  const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-preserve-'));
+  try {
+    const media = path.join(stage, name);
+    fs.symlinkSync(path.resolve(file), media);
+    const page = path.join(stage, 'index.html');
+    fs.writeFileSync(page, pageFor(name, element));
+
+    log.step(`${name}: ${general?.Format ?? info.format ?? '?'} (${kind ?? '?'}) in <${element}>`);
+    const { reports: [r] } = await rewritePages([page], { index, client, opts: { write: true, scripts: './', attrs: opts.attrs, runtime: opts.runtime, refresh: true } });
+    const e = r.elements[0];
+    if (!e || e.skipped) throw new CliError(`no pipeline for it: ${e?.skipped ?? 'the page has no media element'}`);
+    for (const w of r.warnings) log.warn(w);
+    const broken = (r.files ?? []).filter((f) => f.status === 'missing' || f.status === 'failed');
+    if (broken.length) throw new CliError(broken.map((f) => `${f.ref}: ${f.missing ?? f.error}`).join('; '));
+
+    // The items: the page first (the primary item), the modules in the order
+    // the page loads them, the media last.
+    const rel = (p) => path.relative(stage, p).split(path.sep).join('/');
+    const modules = (r.files ?? []).map((f) => ({ name: rel(f.dest), path: f.dest, kind: f.kind, from: f.source?.label }));
+    if (name === 'index.html' || modules.some((m) => m.name === name)) throw new CliError(`the file is named like an item of the package (${name})`, { hint: 'rename it, then preserve it' });
+    const mime = info.mime ?? general?.InternetMediaType ?? 'application/octet-stream';
+    const items = [
+      { name: 'index.html', path: page, kind: 'page' },
+      ...modules,
+      { name, path: fs.realpathSync(media), kind: 'media', type: mime },
+    ].map((it, i) => ({ ...it, id: i + 1, type: it.type ?? ITEM_TYPES[path.extname(it.name)] ?? 'application/octet-stream' }));
+
+    const out = path.resolve(opts.output ?? `${name.replace(/\.[^.]+$/, '')}.bevara.mp4`);
+    if (out === path.resolve(file)) throw new CliError('the package would replace the file it preserves', { hint: 'name another one with -o' });
+    const written = await writePackage(items, out, { primary: 1 });
+
+    // Read back as the service worker reads it: the page, then each item by name.
+    const check = verify(out, items);
+    if (check.ok === false) throw new CliError(`the package does not read back: ${check.problems.join('; ')}`);
+    if (!opts.json) printReport({ file, out, e, items: written.items, size: written.size, check });
+
+    let viewer = null;
+    if (opts.viewer) viewer = writeViewer(out, { quiet: opts.json });
+
+    return {
+      file, package: out, size: written.size, element: e.is, using: e.using, with: e.with,
+      items: written.items.map(({ id, name: n, type, size, kind: k, from }) => ({ id, name: n, type, size, kind: k, from })),
+      verified: check.ok, viewer, registry,
+    };
+  } finally {
+    if (opts.keep) log.step(`staging kept in ${stage}`);
+    else fs.rmSync(stage, { recursive: true, force: true });
+  }
+}
+
+// Files above this are not read back whole (the check holds the package in memory).
+const VERIFY_LIMIT = 1024 ** 3;
+
+function verify(out, items) {
+  if (fs.statSync(out).size > VERIFY_LIMIT) return { ok: null, why: 'too large to read back in memory' };
+  const pkg = readPackage(out);
+  const problems = [];
+  if (pkg.handler !== 'html') problems.push(`meta handler "${pkg.handler}", not "html"`);
+  if (pkg.primary?.name !== 'index.html') problems.push('the primary item is not the page');
+  for (const it of items) {
+    const got = pkg.items.find((x) => x.id === pkg.hasItem(it.name));
+    if (!got) { problems.push(`${it.name}: not found by name`); continue; }
+    if (!got.data || !Buffer.from(got.data).equals(fs.readFileSync(it.path))) problems.push(`${it.name}: bytes differ`);
+    if (got.type !== it.type) problems.push(`${it.name}: MIME ${got.type}, expected ${it.type}`);
+  }
+  return { ok: !problems.length, problems };
+}
+
+function printReport({ file, out, e, items, size, check }) {
+  console.log(`${color.bold(path.basename(file))}  ${color.dim(`is="${e.is}" using="${e.using}" with="${e.with.join(';')}"`)}`);
+  const rows = items.map((it) => [String(it.id), it.name, it.type, formatBytes(it.size), color.dim(it.kind === 'page' ? 'primary item' : it.from ?? it.kind)]);
+  console.log(table(rows, { header: ['#', 'Item', 'MIME', 'Size', 'From'], indent: '  ', shrink: [1, 4] }));
+  const verified = check.ok ? 'read back with mp4box.js' : `not read back (${check.why})`;
+  log.ok(`${path.relative(process.cwd(), out) || out}  ${formatBytes(size)}, ${items.length} items, ${verified}`);
+}
+
+/* The service worker that opens the package, mp4box.js, and a page that
+ * installs the worker and opens the package - next to the .mp4. */
+function writeViewer(out, { quiet = false } = {}) {
+  const dir = path.dirname(out);
+  const pkgName = path.basename(out);
+  fs.copyFileSync(path.join(TEMPLATES, 'bevara-sw.js'), path.join(dir, 'bevara-sw.js'));
+  const require = createRequire(import.meta.url);
+  const dist = path.dirname(require.resolve('mp4box'));
+  const libDir = path.join(dir, 'mp4box');
+  fs.mkdirSync(libDir, { recursive: true });
+  for (const f of fs.readdirSync(dist)) if (f.endsWith('.mjs')) fs.copyFileSync(path.join(dist, f), path.join(libDir, f));
+  fs.copyFileSync(path.join(dist, '..', 'LICENSE'), path.join(libDir, 'LICENSE'));
+  const html = fs.readFileSync(path.join(TEMPLATES, 'viewer.html'), 'utf8')
+    .replaceAll('{{title}}', escapeHtml(pkgName))
+    .replaceAll('{{package}}', escapeHtml(pkgName))
+    .replaceAll('{{packageJson}}', JSON.stringify(encodeURI(pkgName)));
+  const viewer = path.join(dir, pkgName.replace(/\.mp4$/i, '') + '.html');
+  fs.writeFileSync(viewer, html);
+  if (!quiet) log.ok(`${path.relative(process.cwd(), viewer) || viewer}  opens it (serve the directory over http: bevara-sw.js and mp4box/ beside it)`);
+  return viewer;
+}

@@ -84,6 +84,19 @@ Every publish is signed and appended to the registry's append-only, hash-chained
 log; `bevara install` verifies the signature over the downloaded bytes and
 `bevara audit` extends the checkpoint pinned in `bevara-lock.json`.
 
+## Preserve a file with its player
+
+```bash
+bevara preserve clip.ogv                 # clip.bevara.mp4: the file, its page, solver and accessors
+bevara preserve clip.ogv --viewer        # also the service worker and clip.bevara.html that open it
+```
+
+The package is an MP4 whose `meta` box (handler `html`) lists the page as its
+primary item and the tag script, solver and accessors (Wasm bytecode) as the
+other items, stored in the `mdat` with the media unchanged — §5.3 of the
+MMSys'27 paper. Served over HTTP with the service worker beside it, opening
+the `.html` plays the file from the package alone.
+
 ## Test and measure a pipeline
 
 ```bash
