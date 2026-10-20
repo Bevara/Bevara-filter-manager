@@ -14,6 +14,7 @@ const app = createApp({
   maxTarball: env.MAX_TARBALL_BYTES ? parseInt(env.MAX_TARBALL_BYTES, 10) : undefined,
   defaultNamespace: env.DEFAULT_NAMESPACE,
   requireSignatures: env.REQUIRE_SIGNATURES !== 'false',
+  adminAudiences: (env.ADMIN_OIDC_AUDIENCES ?? '').split(',').map((s) => s.trim()).filter(Boolean),
   log: (msg) => console.log(new Date().toISOString(), msg),
 });
 

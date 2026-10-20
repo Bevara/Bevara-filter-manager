@@ -428,3 +428,17 @@ Service Worker, extended) and a page that installs it.
 
 - Where: `cli/src/commands/preserve.js`, `cli/src/lib/mp4-package.js`, `cli/templates/preserve/`; `rewritePages` in `update-page.js`
 - Checked by: `cli/test/mp4-package.test.js`; JXL, PNG, Ogg Vorbis and Ogg Theora packages opened in Chromium through the service worker
+
+### R32
+**Administrators see how the registry is used** (2026-10-20), on a dashboard
+of their own (https://dashboard.bevara.ddns.net): downloads, page loads of
+accessors, runtimes and tag scripts, publishes, API calls, per day and per
+package. The registry counts what it serves per day, package, version and kind
+of request - counts only, no address, no account - and keeps the counts of
+unpublished packages. Only administrators read them: with a registry token, or
+with an access token the identity provider issued to the dashboard
+(`ADMIN_OIDC_AUDIENCES`) for a person whose single-sign-on account is an
+administrator's.
+
+- Where: `registry/src/stats.js`, `stats.track` calls and `/-/admin/*` in `registry/src/app.js`, `verifyAccessToken` in `registry/src/oidc.js`; the dashboard in `~/project/registry-dashboard`, deployed from `SDK/dashboard`
+- Checked by: `registry/test/stats.test.js`

@@ -101,6 +101,18 @@ CREATE TABLE IF NOT EXISTS accessor_names (
   key TEXT PRIMARY KEY,
   name TEXT NOT NULL REFERENCES filters(name) ON DELETE CASCADE
 );
+-- Usage counters for the administrators' dashboard: one row per day, package,
+-- version and kind of request, counts only (no address, no user). Rows outlive
+-- the packages they count, so that history survives an unpublish. Requests that
+-- name no package (the index, a search) have name = version = ''.
+CREATE TABLE IF NOT EXISTS stats_daily (
+  day TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  version TEXT NOT NULL DEFAULT '',
+  channel TEXT NOT NULL,
+  n INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, name, version, channel)
+);
 `;
 
 export function openDb(file = ':memory:') {

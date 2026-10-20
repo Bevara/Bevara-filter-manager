@@ -9,6 +9,7 @@ import { Auth } from './auth.js';
 import { Oidc } from './oidc.js';
 import { Store } from './store.js';
 import { Ledger } from './ledger.js';
+import { Stats } from './stats.js';
 import { extractTarball } from './tarball.js';
 import { inspectWasm, accessorFileName } from './wasm.js';
 import { validateManifest, normalizeManifest, publicManifest, patentNotice, NAME_RE, PART_RE, fullName, splitName, shortName } from './manifest.js';
@@ -38,6 +39,8 @@ export function createApp(config = {}) {
     maxTarball: config.maxTarball ?? 256 * 1024 * 1024,
     defaultNamespace: config.defaultNamespace ?? 'bevara',
     requireSignatures: config.requireSignatures ?? true,
+    // OIDC client ids whose access tokens may read /-/admin/* (the dashboard's).
+    adminAudiences: config.adminAudiences ?? [],
     keyFile: config.keyFile,               // registry signing key; ephemeral when dbFile is ':memory:'
     log: config.log ?? (() => {}),
   };
@@ -46,6 +49,7 @@ export function createApp(config = {}) {
   const store = new Store(path.join(cfg.dataDir, 'store'));
   const ledger = new Ledger(db, { dataDir: cfg.dbFile === ':memory:' ? null : cfg.dataDir, keyFile: cfg.keyFile });
   const oidc = cfg.oidc?.issuer ? new Oidc({ ...cfg.oidc, publicUrl: cfg.publicUrl ?? 'http://localhost:8080' }) : null;
+  const stats = new Stats(db, { log: cfg.log });
   const router = new Router();
 
   // "theora_1.wasm" -> "theora": the name a page uses, without its generation, any case.
@@ -227,6 +231,7 @@ export function createApp(config = {}) {
     const user = auth.login(name ?? '', password ?? '');
     if (!user) throw new HttpError(401, 'invalid username or password');
     claimOwnNamespace(user);
+    stats.track(req, 'login');
     json(res, 200, { ok: true, user: { name: user.name, role: user.role }, token: auth.createToken(user.id, label ?? 'cli') });
   });
 
@@ -250,8 +255,9 @@ export function createApp(config = {}) {
     if (u.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname)) throw new HttpError(400, 'callback must point to the local machine');
     return u.toString();
   };
-  const finishWebLogin = (res, user, callback) => {
+  const finishWebLogin = (req, res, user, callback) => {
     claimOwnNamespace(user);
+    stats.track(req, 'login');
     const token = auth.createToken(user.id, 'cli-web');
     if (!callback) return html(res, 200, tokenPage(token));
     const u = new URL(callback);
@@ -271,7 +277,7 @@ export function createApp(config = {}) {
     const callback = validCallback(form.callback || null);
     const user = auth.login(form.name ?? '', form.password ?? '');
     if (!user) return html(res, 401, loginFormPage({ callback: callback ?? '', error: 'Invalid username or password' }));
-    finishWebLogin(res, user, callback);
+    finishWebLogin(req, res, user, callback);
   });
 
   router.get('/-/login/web/callback', async (req, res, { url }) => {
@@ -280,7 +286,7 @@ export function createApp(config = {}) {
     if (err) throw new HttpError(401, `identity provider error: ${err} ${url.searchParams.get('error_description') ?? ''}`);
     const identity = await oidc.exchange(url.searchParams.get('code'), url.searchParams.get('state'));
     const user = auth.upsertOidcUser(identity);
-    finishWebLogin(res, user, identity.callback);
+    finishWebLogin(req, res, user, identity.callback);
   });
 
   // ------------------------------------------------------------- keys
@@ -359,10 +365,15 @@ export function createApp(config = {}) {
     if (support) out = out.filter((f) => f.support.includes(support));
     if (format) out = out.filter((f) => f.formats.some((x) => x.toLowerCase() === format));
     if (ns) out = out.filter((f) => f.namespace === ns);
+    stats.track(req, 'search');
     json(res, 200, { total: out.length, filters: out.slice(offset, offset + limit) });
   });
 
-  router.get('/filters/:name', (req, res, { params }) => json(res, 200, packument(req, validName(params.name))));
+  router.get('/filters/:name', (req, res, { params }) => {
+    const doc = packument(req, validName(params.name));
+    stats.track(req, 'metadata', doc.name);
+    json(res, 200, doc);
+  });
 
   // Must be registered before /filters/:name/:version.
   router.get('/filters/:name/owners', (req, res, { params }) => json(res, 200, { owners: q.owners.all(validName(params.name)).map((o) => o.name) }));
@@ -377,6 +388,7 @@ export function createApp(config = {}) {
     }
     const row = version && q.version.get(name, version);
     if (!row) throw new HttpError(404, `no version of "${name}" matches "${params.version}"`);
+    stats.track(req, 'metadata', name, row.version);
     json(res, 200, versionDoc(req, row));
   });
 
@@ -386,6 +398,7 @@ export function createApp(config = {}) {
     const row = m && q.version.get(name, m[1]);
     if (!row) throw new HttpError(404, 'tarball not found');
     q.bumpDownloads.run(name, row.version);
+    stats.track(req, 'tarball', name, row.version);
     await sendFile(req, res, store.path(name, row.version, params.file), 'application/gzip', { 'cache-control': 'public, max-age=31536000, immutable', 'access-control-allow-origin': '*' });
   });
 
@@ -400,6 +413,7 @@ export function createApp(config = {}) {
     const f = row && filesOf(row).find((x) => x.file === params.file);
     if (!f) throw new HttpError(404, 'accessor not found');
     q.bumpDownloads.run(row.name, row.version);
+    stats.track(req, 'accessor', row.name, row.version);
     await sendFile(req, res, store.path(row.name, row.version, f.file), typeOf(f.file), { ...wasmHeaders, ...patentHeaders(row), 'cache-control': 'public, max-age=31536000, immutable', 'x-bevara-version': row.version });
   });
 
@@ -433,6 +447,7 @@ export function createApp(config = {}) {
   };
 
   router.get('/accessors/index.json', (req, res) => {
+    stats.track(req, 'index');
     json(res, 200, { registry: baseUrl(req), generated: new Date().toISOString(), checkpoint: ledger.checkpoint(), filters: indexEntries(req), runtimes: runtimeEntries(req), tags: tagEntries(req) }, wasmHeaders);
   });
 
@@ -444,6 +459,7 @@ export function createApp(config = {}) {
     let q;
     try { q = normalizeQuery(query); } catch (e) { throw new HttpError(400, `invalid query: ${e.message}`, { hint: 'see docs/REGISTRY_API.md, "Selection"' }); }
     const { matches, excluded, uncharacterised } = selectAccessors(indexEntries(req), q);
+    stats.track(req, 'select');
     json(res, 200, { query: q, total: matches.length, matches, excluded, uncharacterised }, wasmHeaders);
   };
   router.post('/-/select', async (req, res) => {
@@ -473,6 +489,7 @@ export function createApp(config = {}) {
   // Same shape as filters/filter_list.json in the Bevara filters repository.
   router.get('/accessors/filter_list.json', (req, res) => {
     const names = latestRows().filter((r) => kindOf(r) === 'filter').map((r) => shortName(r.name));
+    stats.track(req, 'filter-list');
     json(res, 200, { tag: TAG_BLOCK, using: ['core'], with: [...new Set(names)] }, wasmHeaders);
   });
 
@@ -491,6 +508,7 @@ export function createApp(config = {}) {
     const f = filesOf(row).find((x) => x.file === wanted);
     if (!f) throw new HttpError(404, m[3] === 'js' ? `${row.name} has no ${wanted}` : `this accessor is published as ${row.wasm_file}`);
     q.bumpDownloads.run(row.name, row.version);
+    stats.track(req, 'accessor-latest', row.name, row.version);
     await sendFile(req, res, store.path(row.name, row.version, f.file), typeOf(f.file), { ...wasmHeaders, ...patentHeaders(row), 'cache-control': 'public, max-age=300', 'x-bevara-version': row.version, 'x-bevara-name': row.name });
   });
 
@@ -665,6 +683,7 @@ export function createApp(config = {}) {
       await store.remove(name, version);     // the files were written before the transaction
       throw e;
     }
+    stats.track(req, 'publish', name, version);
     cfg.log(`published ${name}@${version} by ${user.name}${sigInfo ? ` (log #${sigInfo.logSeq})` : ' (unsigned)'}`);
     const doc = versionDoc(req, q.version.get(name, version));
     json(res, 201, { ok: true, name, version, warnings, dist: doc.dist, signature: doc.signature, checkpoint: ledger.checkpoint() });
@@ -680,6 +699,7 @@ export function createApp(config = {}) {
     db.prepare('DELETE FROM versions WHERE name = ? AND version = ?').run(name, params.version);
     await store.remove(name, params.version);
     ledger.appendOwn({ type: 'yank', name, version: params.version, wasmSha256: row.wasm_sha256, by: user.name });
+    stats.track(req, 'unpublish', name, params.version);
     if (q.versions.all(name).length === 0) db.prepare('DELETE FROM filters WHERE name = ?').run(name);
     else refreshLatest(name);
     json(res, 200, { ok: true, removed: `${name}@${params.version}` });
@@ -693,6 +713,7 @@ export function createApp(config = {}) {
     for (const row of q.versions.all(name)) {
       await store.remove(name, row.version);
       ledger.appendOwn({ type: 'yank', name, version: row.version, wasmSha256: row.wasm_sha256, by: user.name });
+      stats.track(req, 'unpublish', name, row.version);
     }
     db.prepare('DELETE FROM filters WHERE name = ?').run(name);
     json(res, 200, { ok: true, removed: name });
@@ -712,10 +733,12 @@ export function createApp(config = {}) {
       for (const v of targets) db.prepare('UPDATE versions SET deprecated = ? WHERE name = ? AND version = ?').run(msg, name, v);
       refreshLatest(name);
       ledger.appendOwn({ type: 'deprecate', name, versions: targets, message: msg, by: user.name });
+      stats.track(req, 'deprecate', name);
       return json(res, 200, { ok: true, deprecated: msg, versions: targets });
     }
     db.prepare('UPDATE filters SET deprecated = ? WHERE name = ?').run(msg, name);
     ledger.appendOwn({ type: 'deprecate', name, message: msg, by: user.name });
+    stats.track(req, 'deprecate', name);
     json(res, 200, { ok: true, deprecated: msg, name });
   });
 
@@ -793,6 +816,7 @@ export function createApp(config = {}) {
   // Body: { filters: { name: version } }  ->  per filter status used by `bevara audit`.
   router.post('/-/audit', async (req, res) => {
     const { filters = {} } = await readJson(req);
+    stats.track(req, 'audit');
     const report = {};
     for (const [rawName, version] of Object.entries(filters)) {
       if (!NAME_RE.test(rawName)) continue;
@@ -812,6 +836,36 @@ export function createApp(config = {}) {
       };
     }
     json(res, 200, { report, checkpoint: ledger.checkpoint() });
+  });
+
+  // --------------------------------------------------------------- admin
+  /* Read by the administrators' dashboard. Either a registry token of an
+   * administrator, or an access token the identity provider issued to one of
+   * the applications in ADMIN_OIDC_AUDIENCES for a person whose registry
+   * account (linked by single sign-on) is an administrator's. */
+  const requireAdminCaller = async (req) => {
+    const token = bearer(req);
+    if (!token) throw new HttpError(401, 'authentication required');
+    let user = auth.userForToken(token);
+    if (!user && oidc && cfg.adminAudiences.length && token.split('.').length === 3) {
+      let claims;
+      try { claims = await oidc.verifyAccessToken(token, { audiences: cfg.adminAudiences }); } catch (e) { throw new HttpError(401, `invalid token: ${e.message}`); }
+      user = auth.getUserByOidc(claims.sub);
+      if (!user) throw new HttpError(403, 'no registry account is linked to this identity: sign in to the registry once with single sign-on (bevara login)');
+    }
+    if (!user) throw new HttpError(401, 'invalid token');
+    requireAdmin(user);
+    return user;
+  };
+  router.get('/-/admin/me', async (req, res) => {
+    const user = await requireAdminCaller(req);
+    json(res, 200, { name: user.name, email: user.email ?? null, role: 'admin' });
+  });
+  router.get('/-/admin/stats', async (req, res, { url }) => {
+    const user = await requireAdminCaller(req);
+    const days = Math.min(Math.max(parseInt(url.searchParams.get('days') ?? '30', 10) || 30, 1), 730);
+    const report = stats.report({ days, kindOf: (manifest) => JSON.parse(manifest).kind ?? 'filter', admins: [...auth.adminUsers] });
+    json(res, 200, { generated: new Date().toISOString(), registry: { name: cfg.name, version: VERSION, publicUrl: baseUrl(req) }, viewer: { name: user.name }, ...report }, { 'cache-control': 'no-store' });
   });
 
   // ------------------------------------------------------------- server
@@ -838,7 +892,7 @@ export function createApp(config = {}) {
 
   const server = http.createServer(handle);
   server.requestTimeout = 10 * 60_000;
-  return { server, db, auth, store, ledger, config: cfg, handle };
+  return { server, db, auth, store, ledger, stats, oidc, config: cfg, handle };
 }
 
 // Ed25519 SPKI DER is 44 bytes and starts with the fixed OID prefix.

@@ -166,6 +166,26 @@ produces }], excluded: [{ name, filter, reason }], uncharacterised: [name] }` �
 capabilities but fail a side condition; `uncharacterised` were published
 without `caps`. A malformed query is a `400` saying what is wrong.
 
+## Usage statistics (administrators)
+The registry counts, per day, package, version and kind of request, what it
+serves (counts only: no address, no account). Channels: `tarball` (`bevara
+install`), `accessor` (a pinned `/accessors/:name/:version/:file`),
+`accessor-latest` (`/accessors/:file`, what pages load), `metadata`, `search`,
+`index`, `filter-list`, `select`, `audit`, `publish`, `unpublish`, `deprecate`,
+`login`. `HEAD` and failed requests are not counted. The per-version `downloads`
+of the packument is the older all-time counter (every download channel, `HEAD` included).
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/-/admin/me` | admin → `{name, email, role}` |
+| GET | `/-/admin/stats?days=30` | admin, 1–730 days → `{range, trackingSince, totals, period, daily[], channelsByKind, packages[], versions[], namespaces[], publishers[], activity[]}` |
+
+Both take a registry token of an administrator, or an OIDC access token (a JWT
+from `OIDC_ISSUER`, checked against its JWKS) issued to one of the client ids in
+`ADMIN_OIDC_AUDIENCES` for a person whose single-sign-on account is an
+administrator's. The dashboard (https://dashboard.bevara.ddns.net, source
+`~/project/registry-dashboard`) uses the latter.
+
 ## Misc
 `GET /-/ping`, `GET /-/config`, `GET /` (web catalog).
 
@@ -180,6 +200,7 @@ without `caps`. A malformed query is a `400` saying what is wrong.
 | `ADMIN_USERS` | | comma-separated admin usernames |
 | `BOOTSTRAP_ADMIN_USER/PASSWORD` | | create an admin at startup if missing |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_SCOPE` | | single sign-on (Casdoor) |
+| `ADMIN_OIDC_AUDIENCES` | | comma-separated OIDC client ids whose access tokens may read `/-/admin/*` (the dashboard's) |
 | `MAX_TARBALL_BYTES` | 256 MiB | |
 | `DEFAULT_NAMESPACE` | `bevara` | namespace for bare names |
 | `REQUIRE_SIGNATURES` | `true` | `false` accepts unsigned publishes (not logged) |
