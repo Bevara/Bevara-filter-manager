@@ -62,6 +62,10 @@ spec:
             # The registry's own log-signing key is created at first start in /data/registry-key.json.
             - name: REQUIRE_SIGNATURES
               value: "true"
+            # Client ids of the Casdoor applications whose access tokens may read the usage
+            # statistics (/-/admin/*): the administrators' dashboard (SDK/dashboard). Not a secret.
+            - name: ADMIN_OIDC_AUDIENCES
+              value: d8bdbda2be7d47af914b
           envFrom:
             - secretRef:
                 name: bevara-registry-secrets
