@@ -19,6 +19,11 @@
 export const DOWNLOAD_CHANNELS = ['tarball', 'accessor', 'accessor-latest'];
 export const CHANNELS = [...DOWNLOAD_CHANNELS, 'metadata', 'search', 'index', 'filter-list', 'select', 'audit', 'publish', 'unpublish', 'deprecate', 'login'];
 
+// What the MCP server may report (POST /-/stats/mcp): anything else is refused.
+export const MCP_EVENTS = ['request', 'tool'];
+const MCP_FIELD = /^[A-Za-z0-9._\/ -]{0,48}$/;
+export const MCP_MAX_ROWS = 2000;
+
 const today = () => new Date().toISOString().slice(0, 10);
 const dayOf = (iso) => String(iso ?? '').slice(0, 10);
 
@@ -28,6 +33,91 @@ export class Stats {
     this.log = log;
     this.bump = db.prepare(`INSERT INTO stats_daily (day, name, version, channel, n) VALUES (?, ?, ?, ?, 1)
       ON CONFLICT (day, name, version, channel) DO UPDATE SET n = n + 1`);
+  }
+
+  /* Adds the counters the MCP server sends. Throws a message on the first
+   * row that is not one it may send (the batch is then refused whole). */
+  ingestMcp(rows) {
+    if (!Array.isArray(rows) || rows.length > MCP_MAX_ROWS) throw new Error(`"counts" must be an array of at most ${MCP_MAX_ROWS} rows`);
+    const now = Date.now();
+    const earliest = new Date(now - 7 * 86400_000).toISOString().slice(0, 10);
+    const latest = new Date(now + 86400_000).toISOString().slice(0, 10);
+    const clean = rows.map((r, i) => {
+      const bad = (why) => new Error(`counts[${i}]: ${why}`);
+      if (!r || typeof r !== 'object') throw bad('not an object');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(r.day ?? '') || r.day < earliest || r.day > latest) throw bad('"day" must be a date of the last 7 days');
+      if (!MCP_EVENTS.includes(r.event)) throw bad(`"event" must be one of ${MCP_EVENTS.join(', ')}`);
+      if (!Number.isInteger(r.n) || r.n < 1 || r.n > 1_000_000) throw bad('"n" must be a positive integer');
+      const f = {};
+      for (const k of ['name', 'ext', 'target', 'source', 'outcome', 'client']) {
+        const v = r[k] ?? '';
+        if (typeof v !== 'string' || !MCP_FIELD.test(v)) throw bad(`"${k}" must be at most 48 letters, digits or . _ / - space`);
+        f[k] = v;
+      }
+      return { day: r.day, event: r.event, ...f, n: r.n };
+    });
+    const add = this.db.prepare(`INSERT INTO mcp_daily (day, event, name, ext, target, source, outcome, client, n) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (day, event, name, ext, target, source, outcome, client) DO UPDATE SET n = n + excluded.n`);
+    this.db.exec('BEGIN');
+    try {
+      for (const r of clean) add.run(r.day, r.event, r.name, r.ext, r.target, r.source, r.outcome, r.client, r.n);
+      this.db.exec('COMMIT');
+    } catch (e) { this.db.exec('ROLLBACK'); throw e; }
+    this.mcpReportedAt = new Date().toISOString();
+    return clean.length;
+  }
+
+  // The MCP server's use over [from, to], one entry per day of `axis`.
+  mcpReport(axis, from, to) {
+    const rows = this.db.prepare('SELECT * FROM mcp_daily WHERE day >= ? AND day <= ?').all(from, to);
+    const daily = new Map(axis.map((d) => [d, { day: d, sessions: 0, requests: 0, toolCalls: 0, errors: 0, tools: {} }]));
+    const sum = (m, k, n) => m.set(k, (m.get(k) ?? 0) + n);
+    const methods = new Map(), clients = new Map(), tools = new Map(), exts = new Map(), targets = new Map(), sources = new Map();
+    const period = { sessions: 0, requests: 0, toolCalls: 0, errors: 0, conversions: 0 };
+    for (const r of rows) {
+      const d = daily.get(r.day);
+      if (r.event === 'request') {
+        period.requests += r.n;
+        sum(methods, r.name, r.n);
+        if (d) d.requests += r.n;
+        if (r.name === 'initialize') {
+          period.sessions += r.n;
+          sum(clients, r.client || '(inconnu)', r.n);
+          if (d) d.sessions += r.n;
+        }
+        continue;
+      }
+      // event "tool"
+      const err = r.outcome === 'error';
+      period.toolCalls += r.n;
+      if (err) period.errors += r.n;
+      const t = tools.get(r.name) ?? tools.set(r.name, { name: r.name, calls: 0, errors: 0 }).get(r.name);
+      t.calls += r.n;
+      if (err) t.errors += r.n;
+      if (r.ext) {
+        const e = exts.get(r.ext) ?? exts.set(r.ext, { ext: r.ext, show: 0, convert: 0, formats: 0, errors: 0 }).get(r.ext);
+        if (r.name === 'bevara_show') e.show += r.n;
+        else if (r.name === 'bevara_convert') e.convert += r.n;
+        else if (r.name === 'bevara_formats') e.formats += r.n;
+        if (err) e.errors += r.n;
+      }
+      if (r.target && !err) { sum(targets, r.target, r.n); period.conversions += r.n; }
+      if (r.source) sum(sources, r.source, r.n);
+      if (d) {
+        d.toolCalls += r.n;
+        if (err) d.errors += r.n;
+        d.tools[r.name] = (d.tools[r.name] ?? 0) + r.n;
+      }
+    }
+    const list = (m, key) => [...m.entries()].map(([k, n]) => ({ [key]: k, n })).sort((a, b) => b.n - a.n);
+    const ever = this.db.prepare('SELECT MIN(day) AS first, MAX(day) AS last FROM mcp_daily').get();
+    return {
+      firstDay: ever.first ?? null, lastDay: ever.last ?? null, reportedAt: this.mcpReportedAt ?? null,
+      period, daily: [...daily.values()],
+      tools: [...tools.values()].sort((a, b) => b.calls - a.calls),
+      extensions: [...exts.values()].sort((a, b) => (b.show + b.convert + b.formats) - (a.show + a.convert + a.formats)).slice(0, 40),
+      targets: list(targets, 'target'), sources: list(sources, 'source'), clients: list(clients, 'client'), methods: list(methods, 'method'),
+    };
   }
 
   // Counting never fails the request it counts. HEAD requests are not counted.
@@ -172,6 +262,6 @@ export class Stats {
       for (const c of Object.keys(k)) k[c] += p.period[c];
     }
 
-    return { range: { days, from, to }, trackingSince, totals, period, daily: [...daily.values()], channelsByKind, packages, versions: versionsTop, namespaces, publishers, activity };
+    return { range: { days, from, to }, trackingSince, totals, period, daily: [...daily.values()], channelsByKind, packages, versions: versionsTop, namespaces, publishers, activity, mcp: this.mcpReport(axis, from, to) };
   }
 }

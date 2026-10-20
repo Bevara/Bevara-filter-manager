@@ -440,5 +440,12 @@ with an access token the identity provider issued to the dashboard
 (`ADMIN_OIDC_AUDIENCES`) for a person whose single-sign-on account is an
 administrator's.
 
-- Where: `registry/src/stats.js`, `stats.track` calls and `/-/admin/*` in `registry/src/app.js`, `verifyAccessToken` in `registry/src/oidc.js`; the dashboard in `~/project/registry-dashboard`, deployed from `SDK/dashboard`
-- Checked by: `registry/test/stats.test.js`
+The Bevara MCP server (mcp.bevara.ddns.net), which has no storage, sends the
+counters of its own use to the registry about once a minute
+(`POST /-/stats/mcp`, shared token `STATS_INGEST_TOKEN`): methods, client name,
+and per tool call the tool, a file extension its catalog knows, the
+conversion target, URL or dropped file, ok or error - never a file name or a
+URL. The registry checks every row and shows them on the same dashboard.
+
+- Where: `registry/src/stats.js`, `stats.track` calls, `/-/admin/*` and `/-/stats/mcp` in `registry/src/app.js`, `verifyAccessToken` in `registry/src/oidc.js`; the dashboard in `~/project/registry-dashboard`, deployed from `SDK/dashboard`; `src/usage.ts` in `~/project/bevara-MCP`
+- Checked by: `registry/test/stats.test.js`, `bevara-MCP/test/usage.test.ts`

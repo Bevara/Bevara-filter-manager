@@ -137,3 +137,67 @@ describe('usage statistics (administrators\' dashboard)', () => {
     } finally { await plain.close(); }
   });
 });
+
+describe('usage reports of the MCP server', () => {
+  let reg, api, admin;
+  const TOKEN = 'mcp-stats-token-0123456789';
+  const day = new Date().toISOString().slice(0, 10);
+  before(async () => {
+    reg = await startRegistry({ statsIngestTokens: [TOKEN] });
+    api = reg.api;
+    admin = await signup(api, 'root');
+  });
+  after(() => reg.close());
+
+  const counts = [
+    { day, event: 'request', name: 'initialize', client: 'claude-ai', n: 3 },
+    { day, event: 'request', name: 'tools/call', n: 9 },
+    { day, event: 'tool', name: 'bevara_show', ext: 'tif', source: 'drop', outcome: 'ok', n: 4 },
+    { day, event: 'tool', name: 'bevara_show', ext: 'jxl', source: 'url', outcome: 'ok', n: 1 },
+    { day, event: 'tool', name: 'bevara_show', ext: 'other', source: 'drop', outcome: 'error', n: 2 },
+    { day, event: 'tool', name: 'bevara_convert', ext: 'tif', target: 'png', source: 'drop', outcome: 'ok', n: 1 },
+    { day, event: 'tool', name: 'bevara_formats', ext: 'heic', outcome: 'ok', n: 1 },
+  ];
+
+  test('only the shared token reports', async () => {
+    assert.equal((await api('POST', '/-/stats/mcp', { body: { counts } })).status, 401);
+    assert.equal((await api('POST', '/-/stats/mcp', { token: 'mcp-stats-token-wrong-0000', body: { counts } })).status, 401);
+    assert.equal((await api('POST', '/-/stats/mcp', { token: admin, body: { counts } })).status, 401);   // not a user's token
+    const off = await startRegistry();
+    try { assert.equal((await off.api('POST', '/-/stats/mcp', { token: TOKEN, body: { counts } })).status, 404); } finally { await off.close(); }
+  });
+
+  test('a report is checked whole: one bad row refuses the batch', async () => {
+    const bad = async (row, why) => {
+      const r = await api('POST', '/-/stats/mcp', { token: TOKEN, body: { counts: [counts[0], row] } });
+      assert.equal(r.status, 400, why);
+    };
+    await bad({ day, event: 'tool', name: 'bevara_show', ext: 'my holiday photo.tif<script>', n: 1 }, 'free text');
+    await bad({ day, event: 'tool', name: 'x'.repeat(49), n: 1 }, 'too long');
+    await bad({ day, event: 'download', n: 1 }, 'unknown event');
+    await bad({ day: '2001-01-01', event: 'request', name: 'ping', n: 1 }, 'old day');
+    await bad({ day, event: 'request', name: 'ping', n: 0 }, 'no count');
+    await bad({ day, event: 'request', name: 'ping', n: 1.5 }, 'fraction');
+    assert.equal((await api('POST', '/-/stats/mcp', { token: TOKEN, body: { counts: Array(2001).fill(counts[0]) } })).status, 400);
+    const r = await api('GET', '/-/admin/stats', { token: admin });
+    assert.equal(r.data.mcp.period.requests, 0);
+  });
+
+  test('the counters add up and the administrators read them', async () => {
+    assert.equal((await api('POST', '/-/stats/mcp', { token: TOKEN, body: { counts } })).data.rows, counts.length);
+    assert.equal((await api('POST', '/-/stats/mcp', { token: TOKEN, body: { counts: [counts[2]] } })).status, 200);
+    const { mcp } = (await api('GET', '/-/admin/stats?days=7', { token: admin })).data;
+    assert.deepEqual(mcp.period, { sessions: 3, requests: 12, toolCalls: 13, errors: 2, conversions: 1 });
+    assert.equal(mcp.lastDay, day);
+    assert.ok(mcp.reportedAt);
+    assert.deepEqual(mcp.tools[0], { name: 'bevara_show', calls: 11, errors: 2 });
+    assert.deepEqual(mcp.extensions.find((e) => e.ext === 'tif'), { ext: 'tif', show: 8, convert: 1, formats: 0, errors: 0 });
+    assert.deepEqual(mcp.targets, [{ target: 'png', n: 1 }]);
+    assert.deepEqual(mcp.clients, [{ client: 'claude-ai', n: 3 }]);
+    assert.deepEqual(mcp.sources.find((s) => s.source === 'url'), { source: 'url', n: 1 });
+    const today = mcp.daily.at(-1);
+    assert.equal(today.toolCalls, 13);
+    assert.equal(today.tools.bevara_show, 11);
+    assert.equal(mcp.daily.length, 7);
+  });
+});

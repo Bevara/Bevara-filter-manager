@@ -180,7 +180,9 @@ of the packument is the older all-time counter (every download channel, `HEAD` i
 | GET | `/-/admin/me` | admin → `{name, email, role}` |
 | GET | `/-/admin/stats?days=30` | admin, 1–730 days → `{range, trackingSince, totals, period, daily[], channelsByKind, packages[], versions[], namespaces[], publishers[], activity[]}` |
 
-Both take a registry token of an administrator, or an OIDC access token (a JWT
+| POST | `/-/stats/mcp` | the MCP server's usage report, with the shared token `STATS_INGEST_TOKEN` (404 when none is set): `{counts: [{day, event: "request"\|"tool", name, ext?, target?, source?, outcome?, client?, n}]}`, at most 2000 rows of the last 7 days, fields of at most 48 letters, digits or `. _ / -` space; one bad row refuses the batch. Counts add up; `/-/admin/stats` returns them as `mcp` |
+
+The admin routes take a registry token of an administrator, or an OIDC access token (a JWT
 from `OIDC_ISSUER`, checked against its JWKS) issued to one of the client ids in
 `ADMIN_OIDC_AUDIENCES` for a person whose single-sign-on account is an
 administrator's. The dashboard (https://dashboard.bevara.ddns.net, source
@@ -200,6 +202,7 @@ administrator's. The dashboard (https://dashboard.bevara.ddns.net, source
 | `ADMIN_USERS` | | comma-separated admin usernames |
 | `BOOTSTRAP_ADMIN_USER/PASSWORD` | | create an admin at startup if missing |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_SCOPE` | | single sign-on (Casdoor) |
+| `STATS_INGEST_TOKEN` | | comma-separated tokens the MCP server presents to `POST /-/stats/mcp` (SDK: Secret `bevara-registry-stats`, made by `SDK/mcp/stats-token.sh`) |
 | `ADMIN_OIDC_AUDIENCES` | | comma-separated OIDC client ids whose access tokens may read `/-/admin/*` (the dashboard's) |
 | `MAX_TARBALL_BYTES` | 256 MiB | |
 | `DEFAULT_NAMESPACE` | `bevara` | namespace for bare names |

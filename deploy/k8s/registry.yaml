@@ -34,7 +34,7 @@ spec:
         fsGroup: 1000              # "node" user in the image
       containers:
         - name: registry
-          image: 192.168.1.120:32000/bevara-registry:1.5.0
+          image: 192.168.1.120:32000/bevara-registry:1.6.0
           imagePullPolicy: Always
           ports:
             - name: http
@@ -69,6 +69,11 @@ spec:
           envFrom:
             - secretRef:
                 name: bevara-registry-secrets
+            # STATS_INGEST_TOKEN, shared with the MCP server that reports its use
+            # (POST /-/stats/mcp). Created by hand, out of git: SDK/mcp/stats-token.sh.
+            - secretRef:
+                name: bevara-registry-stats
+                optional: true
           volumeMounts:
             - name: data
               mountPath: /data

@@ -113,6 +113,23 @@ CREATE TABLE IF NOT EXISTS stats_daily (
   n INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (day, name, version, channel)
 );
+-- What the Bevara MCP server (mcp.bevara.ddns.net) reports of its own use, per
+-- day: JSON-RPC requests (name = method; client = the MCP client's name, on
+-- initialize only) and tool calls (name = tool; the file extension, known to
+-- the catalog or "other"; the conversion target; whether a URL was given or
+-- the file dropped; ok or error). Counts only: no file name, URL or address.
+CREATE TABLE IF NOT EXISTS mcp_daily (
+  day TEXT NOT NULL,
+  event TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  ext TEXT NOT NULL DEFAULT '',
+  target TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT '',
+  outcome TEXT NOT NULL DEFAULT '',
+  client TEXT NOT NULL DEFAULT '',
+  n INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, event, name, ext, target, source, outcome, client)
+);
 `;
 
 export function openDb(file = ':memory:') {

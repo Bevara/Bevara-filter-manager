@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import http from 'node:http';
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import semver from 'semver';
 import { normalizeQuery, selectAccessors } from './select.js';
@@ -41,6 +41,8 @@ export function createApp(config = {}) {
     requireSignatures: config.requireSignatures ?? true,
     // OIDC client ids whose access tokens may read /-/admin/* (the dashboard's).
     adminAudiences: config.adminAudiences ?? [],
+    // Tokens the MCP server presents to report its use (POST /-/stats/mcp). None: refused.
+    statsIngestTokens: config.statsIngestTokens ?? [],
     keyFile: config.keyFile,               // registry signing key; ephemeral when dbFile is ':memory:'
     log: config.log ?? (() => {}),
   };
@@ -866,6 +868,18 @@ export function createApp(config = {}) {
     const days = Math.min(Math.max(parseInt(url.searchParams.get('days') ?? '30', 10) || 30, 1), 730);
     const report = stats.report({ days, kindOf: (manifest) => JSON.parse(manifest).kind ?? 'filter', admins: [...auth.adminUsers] });
     json(res, 200, { generated: new Date().toISOString(), registry: { name: cfg.name, version: VERSION, publicUrl: baseUrl(req) }, viewer: { name: user.name }, ...report }, { 'cache-control': 'no-store' });
+  });
+
+  /* The Bevara MCP server reports its own use here, about once a minute
+   * (it has no storage of its own). A shared token, never a user's. */
+  router.post('/-/stats/mcp', async (req, res) => {
+    const token = bearer(req) ?? '';
+    const known = cfg.statsIngestTokens.some((t) => t.length === token.length && timingSafeEqual(Buffer.from(t), Buffer.from(token)));
+    if (!known) throw new HttpError(cfg.statsIngestTokens.length ? 401 : 404, cfg.statsIngestTokens.length ? 'invalid stats token' : 'usage reports are not enabled on this registry');
+    const { counts } = await readJson(req, { limit: 1024 * 1024 });
+    let n;
+    try { n = stats.ingestMcp(counts); } catch (e) { throw new HttpError(400, e.message); }
+    json(res, 200, { ok: true, rows: n });
   });
 
   // ------------------------------------------------------------- server
