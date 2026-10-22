@@ -31,6 +31,7 @@ only needed to publish.
 bevara probe movie.mkv                  # what the file holds, and the accessors it needs
 bevara update-page index.html           # shows how <img>/<video>/<audio> would become universal tags
 bevara update-page index.html --write   # apply it: also writes the scripts, solver and accessors it loads
+bevara update-page index.html --tags art-player --using solver_1   # other tags than the universal ones, one runtime
 ```
 
 Or manage the accessors yourself:

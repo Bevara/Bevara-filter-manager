@@ -135,7 +135,13 @@ the built-in suggestion instead.
 ```bash
 bevara update-page index.html           # shows the diff, writes nothing
 bevara update-page index.html --write --install
+bevara update-page index.html --tags art-player      # <canvas> gets the ArtPlayer interface (is="art-player_1")
+bevara update-page index.html --using solver_1       # one runtime for every element
 ```
+
+The universal tags are the default; `--tags` puts tags of other published
+tags packages (`bevara tags`) on the elements they extend, and `--using` picks
+the runtime instead of letting the accessors decide.
 
 ```diff
 -  <img src="photo.jxl" alt="Photo">

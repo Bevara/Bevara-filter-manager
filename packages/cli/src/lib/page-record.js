@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { scanTags, getAttr, applyEdits } from './html.js';
-import { pageRequirements } from './page-files.js';
+import { pageRequirements, pageTagNames } from './page-files.js';
 
 export const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 const recordDir = (dir) => path.join(dir, '.bevara', 'pages');
@@ -96,14 +96,21 @@ function usedElsewhere(dir, name) {
 
 // The attributes update-page or the universal elements use (paper, Table 1).
 const UNIVERSAL_ATTRS = new Set(['is', 'using', 'with', 'script-directory', 'out', 'use-cache', 'use-worker', 'use-webcodec', 'progressive']);
-const SCRIPT_RE = /(?:^|\/)universal-[a-z]+_\d+\.js(?:[?#].*)?$/;
+const SCRIPT_RE = /(?:^|\/)([A-Za-z0-9][A-Za-z0-9._-]*_\d+)\.js(?:[?#].*)?$/;
 
 /* Without a record: the page minus its universal markup - the attributes of
- * universal elements and the <script> tags of their definitions. */
+ * universal elements, and of the elements of other tags that name a solver
+ * (is="art-player_1" using="…"), and the <script> tags of their definitions. */
 export function stripUniversal(html) {
   const edits = [];
-  for (const t of scanTags(html)) {
-    if (t.name === 'script' && SCRIPT_RE.test(getAttr(t, 'src')?.value ?? '')) {
+  const tags = scanTags(html);
+  const names = pageTagNames(tags);
+  const isDefinition = (src) => {
+    const m = SCRIPT_RE.exec(src);
+    return !!m && (/^universal-/.test(m[1]) || names.has(m[1]));
+  };
+  for (const t of tags) {
+    if (t.name === 'script' && isDefinition(getAttr(t, 'src')?.value ?? '')) {
       const close = html.toLowerCase().indexOf('</script>', t.end);
       let start = t.start, end = close < 0 ? t.end : close + '</script>'.length;
       // The whole line when the tag is alone on it, as update-page wrote it.
@@ -115,7 +122,7 @@ export function stripUniversal(html) {
       edits.push({ start, end, text: '' });
       continue;
     }
-    if (!/^universal-/.test(getAttr(t, 'is')?.value ?? '')) continue;
+    if (!names.has(getAttr(t, 'is')?.value)) continue;
     t.attrs.forEach((a, i) => {
       if (!UNIVERSAL_ATTRS.has(a.name)) return;
       const prevEnd = i > 0 ? t.attrs[i - 1].end : t.nameEnd;

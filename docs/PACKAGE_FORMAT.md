@@ -173,6 +173,14 @@ kind `"tags"`, from the player:
 
 The generation is the `_N` of the scripts' names. No `"using"`, no emsdk.
 
+A tag that `"extends"` a universal one stands for its element: `bevara
+update-page --tags <package>` puts it on those elements instead of the
+universal tag (the index gives `extends` per script). `art-player`
+(`webinterface/ArtPlayer/packages/art-player` in the player) extends
+`universal-canvas_1`: `<canvas is="art-player_1" src="…" using="…" with="…">`,
+the universal canvas inside an ArtPlayer. A tag other than the universal
+canvas reads its source from `src`.
+
 `emsdk` (the Emscripten version, e.g. `"6.0.8"`) is derived at publish from
 the CMake configuration of the build directory; it is never written in
 `<name>.json`.

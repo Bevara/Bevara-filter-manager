@@ -424,12 +424,18 @@ export function createApp(config = {}) {
   const latestRows = () => db.prepare('SELECT v.* FROM filters f JOIN versions v ON v.name = f.name AND v.version = f.latest WHERE f.deprecated IS NULL ORDER BY f.name').all();
   const kindOf = (r) => JSON.parse(r.manifest).kind ?? 'filter';
   const isRuntime = (r) => kindOf(r) === 'runtime';
-  // The tag scripts pages load with <script src>, one entry per file.
+  // The tag scripts pages load with <script src>, one entry per file, with the
+  // tag each one builds on ("extends"), which tells update-page --tags which
+  // element it stands for.
   const tagEntries = (req) => {
     const base = baseUrl(req);
-    return latestRows().filter((r) => kindOf(r) === 'tags').flatMap((r) => filesOf(r).map((f) => ({
-      name: r.name, version: r.version, file: f.file, url: `${base}/accessors/${encodeURIComponent(r.name)}/${r.version}/${f.file}`, integrity: 'sha256-' + b64(f.sha256), size: f.size, patents: JSON.parse(r.manifest).patents ?? null,
-    })));
+    return latestRows().filter((r) => kindOf(r) === 'tags').flatMap((r) => {
+      const m = JSON.parse(r.manifest);
+      return filesOf(r).map((f) => ({
+        name: r.name, version: r.version, file: f.file, url: `${base}/accessors/${encodeURIComponent(r.name)}/${r.version}/${f.file}`, integrity: 'sha256-' + b64(f.sha256), size: f.size, patents: m.patents ?? null,
+        extends: m.extends?.[f.file] ?? null,
+      }));
+    });
   };
   // The solvers pages name in using="…": what update-page copies next to a page.
   const runtimeEntries = (req) => {

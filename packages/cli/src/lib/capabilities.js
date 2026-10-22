@@ -163,8 +163,16 @@ export function solverOrder(index, prefer) {
  * @returns {resolveNeeds() & { using: string, fits: string[], bySolver: Map, conflict: Array<{module, using}>|null }}
  *   fits: every solver that serves all needs. conflict: when each need has an
  *   accessor but no single solver serves them all, the accessors that restrict it.
+ *   With `only`, that solver and no other (update-page --using): "missing" are
+ *   then the needs no accessor linking against it answers.
  */
-export function resolvePipeline(needs, index, { prefer } = {}) {
+export function resolvePipeline(needs, index, { prefer, only } = {}) {
+  if (only) {
+    const r = resolveNeeds(needs, index, { solver: only });
+    return { ...r, using: only, fits: r.missing.length ? [] : [only], bySolver: new Map([[only, r]]), noRuntimes: false,
+      conflict: null, unpublishedRuntimes: null,
+      undeclared: r.needs.map((n) => n.chosen).filter((e) => e && !e.using?.length).map((e) => e.module) };
+  }
   const bySolver = new Map(solverOrder(index, prefer).map((s) => [s, resolveNeeds(needs, index, { solver: s })]));
   // Every solver that serves all needs, the one that answers them by format
   // rather than by extension first (then in solverOrder).

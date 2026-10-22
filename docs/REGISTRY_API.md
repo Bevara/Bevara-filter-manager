@@ -123,8 +123,10 @@ record adds `tagsSha256: {script: sha256}`. Each script is served at
 `/accessors/<script>` (found through the names the package reserved) and at
 `/accessors/<name>/<version>/<script>`; the version document lists them in
 `dist.files`; `/accessors/index.json` lists them under `tags` (`name`,
-`version`, `file`, `url`, `integrity`, `size`). `"extends"` maps a script to
-the tag it builds on.
+`version`, `file`, `url`, `integrity`, `size`, `extends`). `"extends"` maps a
+script to the tag it builds on; the index gives it per script (`"extends":
+"universal-canvas_1"`, or `null`), which tells `update-page --tags` the element
+a tag stands for.
 
 ## Patent status
 

@@ -96,6 +96,17 @@ describe('solvers', () => {
     assert.deepEqual(p.fits, ['solver_minimal_1', 'solver_1']);
   });
 
+  test('with "only" (update-page --using), that solver or nothing', () => {
+    const forced = resolvePipeline(needsOf(J2K, { ext: 'j2k' }), { filters: [OPENJPEG] }, { prefer: 'solver_minimal_1', only: 'solver_1' });
+    assert.equal(forced.using, 'solver_1');
+    assert.deepEqual(forced.fits, ['solver_1']);
+    // isobmff links against solver_1 only: under solver_minimal_1 the container is missing.
+    const refused = resolvePipeline(needsOf(MP4, { ext: 'm4a' }), { filters: [ISO1, ALAC] }, { only: 'solver_minimal_1' });
+    assert.equal(refused.using, 'solver_minimal_1');
+    assert.ok(refused.missing.length);
+    assert.deepEqual(refused.fits, []);
+  });
+
   test('an accessor\'s "using" imposes the solver', () => {
     const p = resolvePipeline(needsOf(MP4, { ext: 'm4a' }), { filters: [ISO1, ALAC] }, { prefer: 'solver_minimal_1' });
     assert.equal(p.using, 'solver_1');

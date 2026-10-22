@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -7,6 +7,8 @@ import { Project } from '../src/lib/project.js';
 import { filterManifest, packFilter } from '../src/lib/pack.js';
 import { validateManifest } from '../src/lib/manifest.js';
 import { pageRequirements, locateSources } from '../src/lib/page-files.js';
+import { stripUniversal } from '../src/lib/page-record.js';
+import { chooseTags, universalTag, sourceAttrFor } from '../src/lib/tag-choice.js';
 
 function player(over = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-tags-'));
@@ -49,4 +51,65 @@ test('update-page takes a tag script from the tags packages of the index', () =>
   assert.equal(s.source.label, 'bevara:universal-tags@1.0.0');
   assert.match(locateSources(reqs, { index: { filters: [], tags: [] } })[0].missing, /no tags package/);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+describe('update-page --tags: the tag of each element', () => {
+  const at = (name, file, ext = null) => ({ name, version: '1.0.0', file, url: `https://r/acc/${file}`, integrity: 'sha256-x', extends: ext });
+  const index = { filters: [], runtimes: [], tags: [
+    at('bevara:universal-tags', 'universal-canvas_1.js'), at('bevara:universal-tags', 'universal-tags_1.js'),
+    at('bevara:art-player', 'art-player_1.js', 'universal-canvas_1'),
+    at('zoe:fancy', 'fancy-img_1.js', 'universal-img_1'), at('zoe:fancy', 'fancy-art_1.js', 'art-player_1'),
+    at('zoe:loose', 'loose_1.js'),
+  ] };
+
+  test('a package, a tag or element=tag; the universal tags otherwise', () => {
+    assert.deepEqual([...chooseTags(['art-player'], index)], [['canvas', 'art-player_1']]);
+    assert.deepEqual([...chooseTags(['bevara:art-player'], index)], [['canvas', 'art-player_1']]);
+    assert.deepEqual([...chooseTags(['fancy-img_1'], index)], [['img', 'fancy-img_1']]);
+    // A tag built on a tag stands for the element at the root.
+    assert.deepEqual([...chooseTags(['fancy-art_1'], index)], [['canvas', 'fancy-art_1']]);
+    assert.deepEqual([...chooseTags(['canvas=my-canvas_2'], null)], [['canvas', 'my-canvas_2']]);
+    assert.deepEqual([...chooseTags(['art-player,fancy-img_1'], index)].sort(), [['canvas', 'art-player_1'], ['img', 'fancy-img_1']]);
+    // The universal tags are the default: choosing them changes nothing.
+    assert.equal(chooseTags(['universal-tags'], index).size, 0);
+    assert.equal(chooseTags([], index).size, 0);
+    assert.equal(universalTag('video'), 'universal-video_1');
+  });
+
+  test('what cannot be placed is refused', () => {
+    assert.throws(() => chooseTags(['nothing'], index), /no tags package nor tag named nothing/);
+    assert.throws(() => chooseTags(['loose_1'], index), /does not say which element/);
+    assert.throws(() => chooseTags(['art-player'], null), /needs the registry/);
+    assert.throws(() => chooseTags(['span=x_1'], null), /not a media element/);
+    assert.throws(() => chooseTags(['canvas=nogeneration'], null), /not a tag name/);
+    // zoe:fancy puts fancy-art_1 on <canvas>, as art-player does.
+    assert.throws(() => chooseTags(['art-player', 'zoe:fancy'], index), /two tags/);
+  });
+
+  test('the universal canvas reads data-url, every other tag src', () => {
+    assert.equal(sourceAttrFor('canvas', 'universal-canvas_1'), 'data-url');
+    assert.equal(sourceAttrFor('canvas', 'art-player_1'), 'src');
+    assert.equal(sourceAttrFor('img', 'universal-img_1'), 'src');
+  });
+
+  test('the page then loads the script of its tag, its solver and accessors; revert removes them', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-artpage-'));
+    const page = `<html><body>
+<canvas is="art-player_1" src="v.mpg" using="solver_1" with="libmpeg2_1"></canvas>
+<script src="scripts/art-player_1.js"></script>
+<script src="js/jquery_3.js"></script>
+</body></html>`;
+    const reqs = pageRequirements(page, dir);
+    assert.deepEqual(reqs.map((r) => [r.kind, r.ref]), [
+      ['script', 'scripts/art-player_1.js'],
+      ['solver', 'solver_1.js'], ['solver', 'solver_1.wasm'],
+      ['accessor', 'libmpeg2_1.wasm'],
+    ]);
+    assert.equal(locateSources(reqs, { index })[0].source.label, 'bevara:art-player@1.0.0');
+    assert.equal(stripUniversal(page), `<html><body>
+<canvas src="v.mpg"></canvas>
+<script src="js/jquery_3.js"></script>
+</body></html>`);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
 });

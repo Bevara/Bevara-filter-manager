@@ -7,7 +7,8 @@ import { sniff } from '../lib/sniff.js';
 import { readSource, isUrl } from '../lib/source.js';
 import { scanTags, getAttr, setAttributes, renameAttr, applyEdits, previewEdits } from '../lib/html.js';
 import { resolveTree, installResolved } from '../lib/resolve.js';
-import { needsOf, videoTailNeeds, resolvePipeline, pageSolver, describeNeed } from '../lib/capabilities.js';
+import { needsOf, videoTailNeeds, resolvePipeline, pageSolver, describeNeed, publishedRuntimes } from '../lib/capabilities.js';
+import { chooseTags, universalTag, sourceAttrFor } from '../lib/tag-choice.js';
 import { mediaTracks, closeMediaInfo } from '../lib/mediainfo.js';
 import { extensionOf } from '../lib/formats.js';
 import { pageRequirements, locateSources, deployFiles } from '../lib/page-files.js';
@@ -23,6 +24,8 @@ export const options = {
   install: { type: 'boolean', short: 'i' },
   offline: { type: 'boolean' },
   runtime: { type: 'string', multiple: true },
+  using: { type: 'string' },
+  tags: { type: 'string', multiple: true },
   'no-files': { type: 'boolean' },
   refresh: { type: 'boolean' },
 };
@@ -36,7 +39,16 @@ its source from data-url, as the player reads it; a src on it is renamed.
   <img is="universal-img_1" src="photo.jxl" using="solver_minimal_1" with="libjxl_1">
 
 The file is probed, not guessed: an .mp4 holding HEVC and one holding AV1 get
-different \`with\` lists. Nothing is written unless --write is passed; by default
+different \`with\` lists.
+
+The universal tags are the default. --tags puts other tags, published as tags
+packages (bevara tags), on the elements they extend: \`--tags art-player\`
+gives every <canvas> is="art-player_1", the ArtPlayer interface over the
+universal canvas, and leaves the other elements universal. A tag other than
+the universal canvas reads its source from src. --using makes every element
+load one runtime (solver) of the registry instead of the one its accessors
+are picked for; an element no accessor linking against it can decode is
+reported, not rewritten. Nothing is written unless --write is passed; by default
 the changes are shown as a diff. Everything the command does not touch is kept
 byte for byte, including quoting and indentation.
 
@@ -53,20 +65,28 @@ by hand), unless --refresh.
   bevara update-page index.html --write --runtime ../player/build   scripts and solvers from a local build
   bevara update-page index.html --write --install     also record the accessors in bevara.json
   bevara update-page index.html --attrs "progressive use-worker"
+  bevara update-page index.html --tags art-player     <canvas is="art-player_1" src="…">
+  bevara update-page index.html --using solver_1      one runtime for every element
   bevara revert-page index.html                       undo it: the page as it was, the files removed
 
 Options:
   -w, --write        apply the changes (default: show the diff only)
   -f, --force        rewrite elements that already carry an "is" attribute
   -i, --install      also install the accessors into the site project (bevara.json, lockfile)
-  --runtime <dir>    take the universal-*.js scripts and the solvers from this directory
+  --runtime <dir>    take the tag scripts and the solvers from this directory
                      (repeatable; looked in before the registry)
+  --using <runtime>  the runtime (solver) every element loads, e.g. solver_1
+                     (default: the one its accessors link against, shared by the page)
+  --tags <choice>    tags to use instead of the universal ones, on the elements they
+                     extend: a tags package (art-player), a tag (art-player_1), or
+                     element=tag (canvas=art-player_1, no registry needed);
+                     repeatable or comma-separated. The universal tags stay the default
   --no-files         rewrite the HTML only, copy nothing
   --refresh          replace files next to the page that differ from their source
   --non-native       only convert formats no browser engine decodes natively
   --attrs "a b"      extra attributes to set, e.g. "progressive use-worker use-cache"
-  --scripts <base>   where the universal-*.js scripts live (default: scripts/)
-  --no-scripts       do not add the <script> tags for the universal elements
+  --scripts <base>   where the tag scripts live (default: scripts/)
+  --no-scripts       do not add the <script> tags defining the elements
   --offline          use the built-in accessor names, unchecked: they may name
                      accessors nobody has published
   --json             machine-readable report`;
@@ -139,6 +159,17 @@ export async function rewritePages(args, { index, client, opts }) {
 
   const reports = [];
   const allModules = new Set();
+  // The tags and the runtime the pages get, when not the defaults: the
+  // universal tags, and the solver the accessors of each element link against.
+  const tagFor = chooseTags(opts.tags ?? [], index);
+  const only = opts.using?.replace(/\.(js|wasm)$/, '');
+  if (only && index) {
+    const published = publishedRuntimes(index);
+    const local = (opts.runtime ?? []).some((d) => fs.existsSync(path.join(path.resolve(d), `${only}.js`)));
+    if (published && !published.includes(only) && !local) {
+      throw new CliError(`--using ${only}: this registry publishes no such runtime`, { hint: `it publishes ${published.join(', ') || 'none'} (bevara runtimes); a solver built by hand goes in a --runtime <dir>` });
+    }
+  }
 
   for (const file of args) {
     const report = { file, elements: [], scripts: [], warnings: [], changed: false };
@@ -204,9 +235,9 @@ export async function rewritePages(args, { index, client, opts }) {
       // A <video> plays what was decoded once it is remuxed and re-encoded.
       const needs = index ? [...needsOf(tracks, { ext: extensionOf(target) }), ...(tag.name === 'video' ? videoTailNeeds() : [])] : null;
       const element = tag.name === 'canvas' ? 'canvas' : tag.name;
-      const pipeline = index ? resolvePipeline(needs, index, { prefer: element === 'canvas' ? 'solver_1' : info.using }) : null;
+      const pipeline = index ? resolvePipeline(needs, index, { prefer: element === 'canvas' ? 'solver_1' : info.using, only }) : null;
       if (pipeline?.missing.length) {
-        report.elements.push({ line, tag: tag.name, src, format: info.format, skipped: `nothing on this registry can ${pipeline.missing.map(describeNeed).join(', ')}` });
+        report.elements.push({ line, tag: tag.name, src, format: info.format, skipped: `nothing on this registry can ${pipeline.missing.map(describeNeed).join(', ')}${only ? ` with ${only}` : ''}` });
         continue;
       }
       if (pipeline?.noRuntimes && !pipeline.unpublishedRuntimes) {
@@ -231,19 +262,21 @@ export async function rewritePages(args, { index, client, opts }) {
     const shared = pipelines.length ? pageSolver(pipelines, [...present]) : null;
     for (const p of pending) {
       const { tag, srcAttr, line, src, info, element, pipeline } = p;
-      const using = pipeline ? (shared ?? pipeline.using) : info.using;
+      const using = pipeline ? (shared ?? pipeline.using) : (only ?? info.using);
       const withList = pipeline ? (shared ? pipeline.bySolver.get(shared).with : pipeline.with) : info.with;
       // The page will load these: their restricted patent statuses are said here.
       for (const m of withList) {
         const e = index?.filters?.find((f) => f.file === `${m}.wasm`);
         if (patentNotice(e?.patents)) report.warnings.push(`line ${line}: ${m}: ${patentNotice(e.patents)}`);
       }
-      const is = `universal-${element}_1`;
-      needTags.add(element);
+      const is = tagFor.get(element) ?? universalTag(element);
+      needTags.add(is);
+      // The universal canvas reads data-url, the other tags src.
+      const wantedSrc = sourceAttrFor(element, is);
 
       const values = { is, using, with: withList.join(';') };
       for (const a of extra) values[a] = null;      // boolean attributes: progressive, use-worker…
-      const tagEdits = [...setAttributes(html, tag, values), ...(srcAttr === 'src' && tag.name === 'canvas' ? renameAttr(tag, 'src', 'data-url') : [])];
+      const tagEdits = [...setAttributes(html, tag, values), ...(srcAttr !== wantedSrc ? renameAttr(tag, srcAttr, wantedSrc) : [])];
       edits.push(...tagEdits);
       for (const m of withList) allModules.add(m);
       report.elements.push({ line, tag: tag.name, src, format: info.format, kind: info.kind, native: info.native,
@@ -257,7 +290,7 @@ export async function rewritePages(args, { index, client, opts }) {
     // The customised elements do nothing unless their definition is loaded.
     if (!opts['no-scripts'] && needTags.size) {
       const haveScript = (name) => scanTags(html).some((t) => t.name === 'script' && (getAttr(t, 'src')?.value ?? '').includes(name));
-      const missingScripts = [...needTags].map((t) => `universal-${t}_1.js`).filter((n) => !haveScript(n));
+      const missingScripts = [...needTags].map((t) => `${t}.js`).filter((n) => !haveScript(n));
       if (missingScripts.length) {
         const insertAt = findScriptInsertionPoint(html);
         const indent = insertAt.indent ?? '  ';

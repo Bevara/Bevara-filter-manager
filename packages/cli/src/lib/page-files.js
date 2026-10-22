@@ -1,7 +1,9 @@
 /* The files a page needs to work, and putting them where it looks for them.
  *
- * A universal element loads three kinds of file:
- *   - its definition, universal-<tag>_<N>.js, from the <script src> of the page;
+ * A universal element - or one of a tag built on them (is="art-player_1") -
+ * loads three kinds of file:
+ *   - its definition, <tag>_<N>.js (universal-img_1.js…), from the <script src>
+ *     of the page;
  *   - the solver named by using="…": <using>.js and <using>.wasm;
  *   - the accessors named by with="…": <module>.wasm.
  * Without script-directory, the player resolves the last two against the page
@@ -21,7 +23,16 @@ import { scanTags, getAttr } from './html.js';
 import { isUrl } from './source.js';
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest();
-const SCRIPT_RE = /(?:^|\/)(universal-[a-z]+_\d+\.js)(?:[?#].*)?$/;
+const SCRIPT_RE = /(?:^|\/)([A-Za-z0-9][A-Za-z0-9._-]*_\d+\.js)(?:[?#].*)?$/;
+
+/* The elements of a page that go through the pipeline: a universal tag, or
+ * another customised element that names its solver (using="…"). Their "is"
+ * names the scripts the page loads for them. */
+const isPipelineElement = (t) => {
+  const is = getAttr(t, 'is')?.value;
+  return !!is && (/^universal-/.test(is) || !!getAttr(t, 'using'));
+};
+export const pageTagNames = (tags) => new Set(tags.filter(isPipelineElement).map((t) => getAttr(t, 'is').value));
 
 /**
  * What the page loads, from its final HTML.
@@ -36,15 +47,16 @@ export function pageRequirements(html, pageDir) {
     if (!out.has(dest)) out.set(dest, { kind, name, dest, ref: rel });
   };
   const tags = scanTags(html);
+  const names = pageTagNames(tags);
   for (const t of tags) {
     if (t.name !== 'script') continue;
     const src = getAttr(t, 'src')?.value;
     const m = src && !isUrl(src) && !src.startsWith('/') ? SCRIPT_RE.exec(src) : null;
-    if (m) add('script', m[1], decodeURI(src.replace(/[?#].*$/, '')));
+    // The definition of a universal tag, or of a tag an element of the page uses.
+    if (m && (/^universal-/.test(m[1]) || names.has(m[1].slice(0, -3)))) add('script', m[1], decodeURI(src.replace(/[?#].*$/, '')));
   }
   for (const t of tags) {
-    const is = getAttr(t, 'is')?.value;
-    if (!is || !/^universal-/.test(is)) continue;
+    if (!isPipelineElement(t)) continue;
     // An absolute script-directory serves the modules from elsewhere.
     const dirAttr = getAttr(t, 'script-directory')?.value ?? '';
     if (dirAttr.split(';').some((d) => d && isUrl(d))) continue;
@@ -80,7 +92,7 @@ export function locateSources(reqs, { index, runtimeDirs = [] }) {
       }
       return { ...r, missing: index ? `no runtime ${r.name.replace(/\.(js|wasm)$/, '')} on this registry${runtimeDirs.length ? `, nor in ${runtimeDirs.join(', ')}` : ''}` : 'the registry is unreachable' };
     }
-    // A tag script: from a tags package of the registry (bevara:universal-tags).
+    // A tag script: from a tags package of the registry (bevara:universal-tags, bevara:art-player).
     const tag = index?.tags?.find((t) => t.file === r.name);
     if (tag) return { ...r, source: { url: tag.url, integrity: tag.integrity, label: `${tag.name}@${tag.version}` } };
     return { ...r, missing: index ? `no tags package on this registry provides ${r.name}${runtimeDirs.length ? `, nor ${runtimeDirs.join(', ')}` : ''} (bevara tags lists them)` : 'the registry is unreachable' };
