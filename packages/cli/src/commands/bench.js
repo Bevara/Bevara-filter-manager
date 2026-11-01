@@ -6,6 +6,7 @@ import { registryCombinations, fetchModules, mediaKind } from '../lib/run-prep.j
 import { closeMediaInfo } from '../lib/mediainfo.js';
 import { runSession, requireSolver, missingModules, verdict, median, solverForCombination } from '../lib/runner.js';
 import { accessorsDirFor, probeFile } from './test.js';
+import { SOLVER, SOLVER_MINIMAL } from '../lib/solvers.js';
 
 export const options = {
   with: { type: 'string', multiple: true, short: 'W' },
@@ -36,7 +37,7 @@ Options:
   -a, --accessors <dir>  run with the modules of this directory instead (default:
                          nothing to install - chosen on the registry and cached
                          in ~/.bevara/cache)
-  -s, --solver <name>    solver_1 (default) or solver_minimal_1
+  -s, --solver <name>    ${SOLVER} (default) or ${SOLVER_MINIMAL}
       --timeout <s>      give up on a session after this long (default 120)
       --json             machine-readable results`;
 

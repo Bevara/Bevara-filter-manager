@@ -6,13 +6,13 @@ import path from 'node:path';
 import { recordUpdate, backupBeforeReplace, planRevert, applyRevert, stripUniversal, readRecords } from '../src/lib/page-record.js';
 
 const ORIGINAL = '<html><body>\n  <img src="a.jxl" alt="x">\n</body></html>\n';
-const UPDATED = '<html><body>\n  <img src="a.jxl" alt="x" is="universal-img_1" using="solver_minimal_1" with="libjxl_1">\n  <script src="scripts/universal-img_1.js"></script>\n</body></html>\n';
+const UPDATED = '<html><body>\n  <img src="a.jxl" alt="x" is="universal-img_1" using="mm_solver_minimal_1.0.1" with="libjxl_1">\n  <script src="scripts/universal-img_1.js"></script>\n</body></html>\n';
 
 function site() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-revert-'));
   fs.writeFileSync(path.join(dir, 'index.html'), UPDATED);
   const files = {};
-  for (const [rel, data] of [['scripts/universal-img_1.js', 'tag'], ['solver_minimal_1.js', 'js'], ['solver_minimal_1.wasm', 'wasm'], ['libjxl_1.wasm', 'jxl']]) {
+  for (const [rel, data] of [['scripts/universal-img_1.js', 'tag'], ['mm_solver_minimal_1.0.1.js', 'js'], ['mm_solver_minimal_1.0.1.wasm', 'wasm'], ['libjxl_1.wasm', 'jxl']]) {
     const dest = path.join(dir, rel);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, data);
@@ -46,19 +46,19 @@ test('what changed since update-page is kept, unless --force', () => {
 
 test('a file another page loads stays; a replaced file comes back as it was', () => {
   const { dir, page, files } = site();
-  fs.writeFileSync(path.join(dir, 'other.html'), '<img is="universal-img_1" src="b.jxl" using="solver_minimal_1" with="libjxl_1">');
-  // update-page --refresh replaced a hand-built solver_minimal_1.wasm
-  fs.writeFileSync(files['solver_minimal_1.wasm'].dest, 'hand-built');
-  backupBeforeReplace(dir, files['solver_minimal_1.wasm'].dest);
-  fs.writeFileSync(files['solver_minimal_1.wasm'].dest, 'wasm');
-  recordUpdate(page, ORIGINAL, UPDATED, [...Object.values(files).filter((f) => !f.dest.endsWith('solver_minimal_1.wasm')), { ...files['solver_minimal_1.wasm'], status: 'replaced' }]);
+  fs.writeFileSync(path.join(dir, 'other.html'), '<img is="universal-img_1" src="b.jxl" using="mm_solver_minimal_1.0.1" with="libjxl_1">');
+  // update-page --refresh replaced a hand-built mm_solver_minimal_1.0.1.wasm
+  fs.writeFileSync(files['mm_solver_minimal_1.0.1.wasm'].dest, 'hand-built');
+  backupBeforeReplace(dir, files['mm_solver_minimal_1.0.1.wasm'].dest);
+  fs.writeFileSync(files['mm_solver_minimal_1.0.1.wasm'].dest, 'wasm');
+  recordUpdate(page, ORIGINAL, UPDATED, [...Object.values(files).filter((f) => !f.dest.endsWith('mm_solver_minimal_1.0.1.wasm')), { ...files['mm_solver_minimal_1.0.1.wasm'], status: 'replaced' }]);
   const plan = planRevert(page);
   assert.equal(plan.files.find((f) => f.rel === 'libjxl_1.wasm').action, 'keep');
-  assert.equal(plan.files.find((f) => f.rel === 'solver_minimal_1.wasm').action, 'restore');
+  assert.equal(plan.files.find((f) => f.rel === 'mm_solver_minimal_1.0.1.wasm').action, 'restore');
   applyRevert(page, plan);
-  assert.equal(fs.readFileSync(files['solver_minimal_1.wasm'].dest, 'utf8'), 'hand-built');
+  assert.equal(fs.readFileSync(files['mm_solver_minimal_1.0.1.wasm'].dest, 'utf8'), 'hand-built');
   assert.ok(fs.existsSync(files['libjxl_1.wasm'].dest));
-  assert.ok(fs.existsSync(files['solver_minimal_1.js'].dest));       // other.html loads it too
+  assert.ok(fs.existsSync(files['mm_solver_minimal_1.0.1.js'].dest));       // other.html loads it too
 });
 
 test('without a record, the universal markup and the files it loads are removed', () => {

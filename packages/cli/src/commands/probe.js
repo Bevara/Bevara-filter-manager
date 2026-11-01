@@ -8,6 +8,7 @@ import { readSource, HEAD_DEFAULT } from '../lib/source.js';
 import { resolveTree, installResolved } from '../lib/resolve.js';
 import { mediaTracks, closeMediaInfo } from '../lib/mediainfo.js';
 import { needsOf, resolveNeeds, resolvePipeline, describeNeed, elementFor } from '../lib/capabilities.js';
+import { solverDir, SOLVER } from '../lib/solvers.js';
 
 export const options = {
   install: { type: 'boolean', short: 'i' },
@@ -44,10 +45,10 @@ async function probeOne(target, opts, index) {
   const tracks = await mediaTracks(target, source);
   if (!index) return { target, report, tracks, match: null, element: elementFor(tracks, null, report.kind) };
   const needs = needsOf(tracks, { ext: extensionOf(target) });
-  // The element decides the solver to prefer (a canvas uses solver_1, as in the
+  // The element decides the solver to prefer (a canvas uses mm_solver, as in the
   // editor); the accessors' "using" may then impose another.
   const element = elementFor(tracks, resolveNeeds(needs, index), report.kind);
-  const match = resolvePipeline(needs, index, { prefer: element === 'canvas' ? 'solver_1' : report.using });
+  const match = resolvePipeline(needs, index, { prefer: element === 'canvas' ? SOLVER : report.using });
   return { target, report, tracks, match, element };
 }
 
@@ -118,7 +119,7 @@ function printResolved(match, opts, registry) {
     log.info(color.dim('  publish one: bevara publish --build in Editor/Interface/player/solver_minimal or solver'));
   } else if (match.unpublishedRuntimes) {
     log.warn(`these accessors link against ${match.unpublishedRuntimes.join(' or ')}, which this registry does not publish: no page could load them together`);
-    log.info(color.dim(`  publish the runtime: bevara publish --build in its directory (Editor/Interface/player/${match.unpublishedRuntimes[0].replace(/_\d+$/, '')})`));
+    log.info(color.dim(`  publish the runtime: bevara publish --build in its directory (Editor/Interface/player/${solverDir(match.unpublishedRuntimes[0])})`));
   } else if (match.conflict) {
     log.warn(`no solver links all these accessors: ${match.conflict.map((c) => `${c.module} needs ${c.using.join(' or ')}`).join(', ')}`);
     log.info(color.dim('  a page loads one solver: publish a variant of one of them for the other solver, or widen its "using"'));

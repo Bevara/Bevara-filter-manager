@@ -21,6 +21,15 @@ export const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-
 // an accessor file may not be (libOpenVVC_1.wasm).
 export const MODULE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 export const KINDS = ['filter', 'runtime', 'tags'];
+/* A module as pages name it in using="…" and with="…": <base>_<abi> for an
+ * accessor (libpng_1), <base>_<x.y.z> for a runtime (mm_solver_1.0.1), whose
+ * name carries its whole version so that a page pins the solver it was made
+ * with. The ABI is the major either way. */
+export const MODULE_ID_RE = /^([A-Za-z0-9][A-Za-z0-9._-]*?)_(\d+)(?:\.(\d+)\.(\d+))?$/;
+export function splitModule(id) {
+  const m = MODULE_ID_RE.exec(String(id ?? ''));
+  return m ? { base: m[1], abi: parseInt(m[2], 10), version: m[3] === undefined ? null : `${m[2]}.${m[3]}.${m[4]}` } : null;
+}
 
 /* Patent status of what a module implements. Every status is published and
  * served; the two restricted ones are announced to whoever installs, selects
@@ -89,6 +98,7 @@ export function validateManifest(m, { forPublish = false } = {}) {
     if (m.filters !== undefined && !(Array.isArray(m.filters) && m.filters.length === 0)) errors.push('a runtime registers no "filters": list what it registers itself in "builtins" (read from loader.js at publish)');
     if (m.using !== undefined) errors.push('a runtime is what accessors link against: it has no "using"');
     if (m.builtins !== undefined && !isStrArray(m.builtins)) errors.push('"builtins" must list GPAC filter names');
+    if (isStr(m.version) && !/^\d+\.\d+\.\d+$/.test(m.version)) errors.push(`a runtime's "version" is part of its file name (mm_solver_1.0.1.wasm): x.y.z only (got ${JSON.stringify(m.version)})`);
   } else if (!isStrArray(m.filters) || m.filters.length === 0) errors.push('"filters" must list the GPAC filter names registered by the module (e.g. ["theoradec"])');
 
   if (m.support !== undefined) {
@@ -100,9 +110,9 @@ export function validateManifest(m, { forPublish = false } = {}) {
     errors.push('"extension" must map file extensions to the element that shows them ({"jxl": "img"})');
   if (m.keywords !== undefined && !isStrArray(m.keywords)) errors.push('"keywords" must be an array of strings');
   if (m.using !== undefined) {
-    if (!isStrArray(m.using) || !m.using.length || !m.using.every((u) => /^[A-Za-z0-9][A-Za-z0-9._-]*_\d+$/.test(u)))
-      errors.push('"using" must list the solvers the module links against, as pages name them (["solver_1"], ["solver_minimal_1", "solver_1"])');
-  } else if (forPublish && !runtime && !tags) errors.push('"using" must list the runtimes (solvers) the filter links against, as pages name them: ["solver_minimal_1"], ["solver_1"] - each must be published on the registry');
+    if (!isStrArray(m.using) || !m.using.length || !m.using.every((u) => splitModule(u)))
+      errors.push('"using" must list the solvers the module links against, as pages name them (["mm_solver_1.0.1"], ["mm_solver_minimal_1.0.1", "mm_solver_1.0.1"])');
+  } else if (forPublish && !runtime && !tags) errors.push('"using" must list the runtimes (solvers) the filter links against, as pages name them: ["mm_solver_minimal_1.0.1"], ["mm_solver_1.0.1"] - each must be published on the registry');
   if (m.license !== undefined && !isStr(m.license)) errors.push('"license" must be a string (SPDX identifier)');
   if (m.license === undefined && forPublish) warnings.push('no licence: add a LICENCE file (an "SPDX-License-Identifier:" line makes it exact)');
   // Patent status: any status is published and served, but users are told.

@@ -114,8 +114,9 @@ function readDylink(r, end, name) {
 // universal tags expect in their `with` attribute. `module` defaults to the
 // package name without its namespace, and exists so that an accessor whose
 // file name is not all-lowercase (libOpenVVC_1.wasm) keeps a lowercase
-// package name (bevara:libopenvvc).
-export function accessorFileName(name, abi, module) {
+// package name (bevara:libopenvvc). A runtime passes its version, which its
+// file name carries in place of the ABI (mm_solver_1.0.1.wasm).
+export function accessorFileName(name, abi, module, version) {
   const short = name.includes(':') ? name.slice(name.indexOf(':') + 1) : name;
-  return `${module || short}_${abi}.wasm`;
+  return `${module || short}_${version ?? abi}.wasm`;
 }

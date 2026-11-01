@@ -95,17 +95,19 @@ export function addFilterFor(root, name) {
 }
 
 /* The executables a solver's CMakeLists.txt builds as <base>_${VERSION}
- * (add_executable(solver_minimal_${VERSION} …) with set(VERSION "1")): each is
- * <base>_<N>.js plus <base>_<N>.wasm. Same shape as add_filter() calls. */
+ * (add_executable(mm_solver_minimal_${VERSION} …) with set(VERSION "1.0.1")):
+ * each is <base>_<x.y.z>.js plus <base>_<x.y.z>.wasm, whose generation is the
+ * major. Same shape as add_filter() calls. */
 export function readExecutables(root) {
   let text;
   try { text = fs.readFileSync(path.join(root, 'CMakeLists.txt'), 'utf8'); } catch { return []; }
   const src = stripComments(text);
   const version = /\bset\s*\(\s*VERSION\s+"?([^")\s]+)"?\s*\)/i.exec(src)?.[1];
   const out = [];
-  for (const m of src.matchAll(/\badd_executable\s*\(\s*([A-Za-z0-9.-]+(?:_[A-Za-z0-9.-]+)*?)_(\$\{VERSION\}|\d+)(?=[\s)])/gi)) {
+  for (const m of src.matchAll(/\badd_executable\s*\(\s*([A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*?)_(\$\{VERSION\}|\d+(?:\.\d+\.\d+)?)(?=[\s)])/gi)) {
     const raw = m[2] === '${VERSION}' ? version ?? null : m[2];
-    out.push({ name: m[1], generation: raw && /^\d+$/.test(raw) ? parseInt(raw, 10) : null, rawGeneration: raw, line: src.slice(0, m.index).split('\n').length, via: 'add_executable' });
+    const g = raw && /^(\d+)(?:\.\d+\.\d+)?$/.exec(raw);
+    out.push({ name: m[1], generation: g ? parseInt(g[1], 10) : null, version: g && raw.includes('.') ? raw : null, rawGeneration: raw, line: src.slice(0, m.index).split('\n').length, via: 'add_executable' });
   }
   return out;
 }

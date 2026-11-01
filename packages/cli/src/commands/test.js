@@ -8,6 +8,7 @@ import { sniff, CONTAINER_MODULES } from '../lib/sniff.js';
 import { VIDEO_TAIL } from '../lib/formats.js';
 import { readLocal } from '../lib/source.js';
 import { runSession, requireSolver, missingModules, findSolver, solverForCombination } from '../lib/runner.js';
+import { SOLVER, SOLVER_MINIMAL } from '../lib/solvers.js';
 
 export const options = {
   with: { type: 'string', multiple: true, short: 'W' },
@@ -38,7 +39,7 @@ Options:
                          the registry and cached in ~/.bevara/cache)
       --expect <filter>  require this GPAC filter in the resolved graph (repeatable)
       --timeout <s>      give up on a session after this long (default 120)
-  -s, --solver <name>    solver_1 (default, reports statistics) or solver_minimal_1
+  -s, --solver <name>    ${SOLVER} (default, reports statistics) or ${SOLVER_MINIMAL}
   -v, --verbose          print the full GPAC log
       --json             machine-readable report`;
 

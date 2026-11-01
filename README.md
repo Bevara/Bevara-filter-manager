@@ -42,7 +42,7 @@ bevara bench clip.mp4 -n 5 -W "isobmff_1;h264bsd_1" -W "isobmff_1;ffmpeg-h26x_1"
 
 ```
 ✔ testcard.mp4 h264 · isobmff_1;h264bsd_1
-  solver solver_1 · graph:
+  solver mm_solver_1.0.1 · graph:
     fin (src=input.mp4) (idx=1)
     -(PID input.mp4) mp4dmx (dyn_idx=3)
     --(PID input.mp4) h264bsd (dyn_idx=4)
@@ -61,7 +61,7 @@ reported as a failure, which is what makes `test` worth running in CI.
 (GPAC accounts for it per filter) and the wall clock of the session, with the
 median over `-n` runs and one process per run.
 
-Both need the player's distribution — the solver (`solver_1.js`/`.wasm`) next to
+Both need the player's distribution — the solver (`mm_solver_1.0.1.js`/`.wasm`) next to
 the accessors — because the registry distributes accessors, not the solver. Point
 `--accessors <dir>` at it, or keep it in the project's accessors directory.
 
@@ -113,7 +113,7 @@ bevara probe movie.mkv
 #   container    matroska
 #   browsers     decoded natively by at least one engine; the pipeline is the fallback
 #   streams      video h264 (V_MPEG4/ISO/AVC) · audio aac (A_AAC) · text srt
-#   pipeline     using="solver_1" with="webmdmx_1;h264bsd_1;libfaad_1;isobmff_1;libx264_1;libopusenc_1"
+#   pipeline     using="mm_solver_1.0.1" with="webmdmx_1;h264bsd_1;libfaad_1;isobmff_1;libx264_1;libopusenc_1"
 #   accessors    ✓ all six published on the registry
 bevara probe https://example.org/clip.mp4 --json
 bevara probe movie.mkv --install        # install exactly the accessors it needs
@@ -136,7 +136,7 @@ the built-in suggestion instead.
 bevara update-page index.html           # shows the diff, writes nothing
 bevara update-page index.html --write --install
 bevara update-page index.html --tags art-player      # <canvas> gets the ArtPlayer interface (is="art-player_1")
-bevara update-page index.html --using solver_1       # one runtime for every element
+bevara update-page index.html --using mm_solver_1.0.1       # one runtime for every element
 ```
 
 The universal tags are the default; `--tags` puts tags of other published
@@ -145,9 +145,9 @@ the runtime instead of letting the accessors decide.
 
 ```diff
 -  <img src="photo.jxl" alt="Photo">
-+  <img src="photo.jxl" alt="Photo" is="universal-img_1" using="solver_minimal_1" with="libjxl_1">
++  <img src="photo.jxl" alt="Photo" is="universal-img_1" using="mm_solver_minimal_1.0.1" with="libjxl_1">
 -  <video src="trailer.ogv" controls></video>
-+  <video src="trailer.ogv" controls is="universal-video_1" using="solver_1" with="ogg_1;theora_1;vorbis_1;isobmff_1;libx264_1;libopusenc_1"></video>
++  <video src="trailer.ogv" controls is="universal-video_1" using="mm_solver_1.0.1" with="ogg_1;theora_1;vorbis_1;isobmff_1;libx264_1;libopusenc_1"></video>
 +  <script src="scripts/universal-img_1.js"></script>
 +  <script src="scripts/universal-video_1.js"></script>
 ```
@@ -170,7 +170,7 @@ bevara update                          # within the semver ranges; --latest to c
 ```
 
 ```html
-<video is="universal-video_1" src="movie.ogv" using="solver_1" with="ogg_1;vorbis_1;theora_1" controls></video>
+<video is="universal-video_1" src="movie.ogv" using="mm_solver_1.0.1" with="ogg_1;vorbis_1;theora_1" controls></video>
 ```
 
 Sites can also skip the install step and point the player's script directory at the
@@ -198,7 +198,7 @@ directly (newest non-deprecated version, brotli, CORS).
 | `bevara build` / `pack` / `publish` `[dir]` | build with Emscripten, tarball, upload (`-B <dir>` for the build directory) |
 | `bevara unpublish` / `deprecate` / `owner` | maintain published filters |
 | `bevara advisory add/rm/ls` | admin: advisories surfaced by `audit` |
-| `bevara key generate/ls/revoke` | Ed25519 key that signs your publishes (created automatically) |
+| `bevara key generate/ls/revoke` | Ed25519 key that signs the published filter (created automatically) |
 | `bevara log [--verify]` | read or fully verify the registry's append-only log |
 | `bevara namespace ls/add/rm` | namespaces (`bevara:theora`, `alice:myfilter`) and their owners |
 | `bevara login` / `logout` / `whoami` / `adduser` | accounts (SSO or local) |

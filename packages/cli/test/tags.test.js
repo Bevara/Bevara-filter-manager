@@ -95,14 +95,14 @@ describe('update-page --tags: the tag of each element', () => {
   test('the page then loads the script of its tag, its solver and accessors; revert removes them', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-artpage-'));
     const page = `<html><body>
-<canvas is="art-player_1" src="v.mpg" using="solver_1" with="libmpeg2_1"></canvas>
+<canvas is="art-player_1" src="v.mpg" using="mm_solver_1.0.1" with="libmpeg2_1"></canvas>
 <script src="scripts/art-player_1.js"></script>
 <script src="js/jquery_3.js"></script>
 </body></html>`;
     const reqs = pageRequirements(page, dir);
     assert.deepEqual(reqs.map((r) => [r.kind, r.ref]), [
       ['script', 'scripts/art-player_1.js'],
-      ['solver', 'solver_1.js'], ['solver', 'solver_1.wasm'],
+      ['solver', 'mm_solver_1.0.1.js'], ['solver', 'mm_solver_1.0.1.wasm'],
       ['accessor', 'libmpeg2_1.wasm'],
     ]);
     assert.equal(locateSources(reqs, { index })[0].source.label, 'bevara:art-player@1.0.0');

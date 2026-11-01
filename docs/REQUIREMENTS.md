@@ -101,7 +101,7 @@ accessors needed, checked against the registry.
 ### R7
 **`bevara update-page` converts an HTML page to the universal tags**, choosing
 the pipeline from the file each `src` points to:
-`<img src="photo.jxl">` → `<img is="universal-img_1" src="photo.jxl" using="solver_minimal_1" with="libjxl_1">`.
+`<img src="photo.jxl">` → `<img is="universal-img_1" src="photo.jxl" using="mm_solver_minimal_1.0.1" with="libjxl_1">`.
 `using` names the main module (the solver), `with` the accessors.
 
 - Where: `cli/src/lib/html.js`, `commands/update-page.js`
@@ -277,7 +277,7 @@ them in `/accessors/index.json` under `runtimes`.
 - Where: `filterManifest`/`checkArtifact`/`packFilter` in `cli/src/lib/pack.js`, `readExecutables` in
   `cli/src/lib/cmake.js`, `runtimeBuiltins` in `cli/src/lib/caps.js`; publish and `/accessors/*` in `registry/src/app.js`
 - Checked by: `registry.test.js` "runtimes (solvers) as packages", `cli/test/page-files.test.js` "a runtime…",
-  e2e step "publish the runtime solver_1"; by hand, both solvers built alone are byte-identical to the player's build
+  e2e step "publish the runtime mm_solver_1.0.1"; by hand, both solvers built alone are byte-identical to the player's build
 
 ### R23
 **A filter names the runtimes it links against in `"using"`, and at least one
@@ -286,7 +286,7 @@ with an empty one) is refused, by the CLI and by the registry; one whose
 runtimes are all missing is refused, with the runtimes to publish first; one
 with at least one published runtime is accepted, the others reported as
 warnings. A registry may carry several runtimes, one per environment.
-`bevara init` asks for them (default `solver_1`).
+`bevara init` asks for them (default `mm_solver_1.0.1`).
 
 - Where: `validateManifest` (shared), the publish route in `registry/src/app.js`, the pre-build check in `cli/src/commands/publish.js`
 - Checked by: `registry.test.js` "a filter cannot be published before the runtime…", "then the filter publishes…",
@@ -304,7 +304,7 @@ share no runtime, and run it with one they share (`--solver` must be one).
 Among accessors, one that declares the format MediaInfo names comes before
 one whose extension merely matches, and the runtime chosen is the one under
 which the fewest needs rest on an extension (a .opus gets the Ogg demultiplexer
-under solver_minimal_1, not the Opus decoder alone under solver_1); a stream
+under mm_solver_minimal_1.0.1, not the Opus decoder alone under mm_solver_1.0.1); a stream
 MediaInfo does not name falls back on the file's extension (the audio of a
 .mod). `bevara filters` (alias `list`) lists the filters only, with their runtimes - in red when the
 registry does not publish them - and in a site the `using="…"` they all share;

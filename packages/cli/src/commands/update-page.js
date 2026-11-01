@@ -13,6 +13,7 @@ import { mediaTracks, closeMediaInfo } from '../lib/mediainfo.js';
 import { extensionOf } from '../lib/formats.js';
 import { pageRequirements, locateSources, deployFiles } from '../lib/page-files.js';
 import { recordUpdate, backupBeforeReplace } from '../lib/page-record.js';
+import { SOLVER } from '../lib/solvers.js';
 
 export const options = {
   write: { type: 'boolean', short: 'w' },
@@ -36,7 +37,7 @@ customised built-in element and the pipeline that decodes it. A <canvas> takes
 its source from data-url, as the player reads it; a src on it is renamed.
 
   <img src="photo.jxl">
-  <img is="universal-img_1" src="photo.jxl" using="solver_minimal_1" with="libjxl_1">
+  <img is="universal-img_1" src="photo.jxl" using="mm_solver_minimal_1.0.1" with="libjxl_1">
 
 The file is probed, not guessed: an .mp4 holding HEVC and one holding AV1 get
 different \`with\` lists.
@@ -66,7 +67,7 @@ by hand), unless --refresh.
   bevara update-page index.html --write --install     also record the accessors in bevara.json
   bevara update-page index.html --attrs "progressive use-worker"
   bevara update-page index.html --tags art-player     <canvas is="art-player_1" src="…">
-  bevara update-page index.html --using solver_1      one runtime for every element
+  bevara update-page index.html --using mm_solver_1.0.1      one runtime for every element
   bevara revert-page index.html                       undo it: the page as it was, the files removed
 
 Options:
@@ -75,7 +76,7 @@ Options:
   -i, --install      also install the accessors into the site project (bevara.json, lockfile)
   --runtime <dir>    take the tag scripts and the solvers from this directory
                      (repeatable; looked in before the registry)
-  --using <runtime>  the runtime (solver) every element loads, e.g. solver_1
+  --using <runtime>  the runtime (solver) every element loads, e.g. mm_solver_1.0.1
                      (default: the one its accessors link against, shared by the page)
   --tags <choice>    tags to use instead of the universal ones, on the elements they
                      extend: a tags package (art-player), a tag (art-player_1), or
@@ -235,7 +236,7 @@ export async function rewritePages(args, { index, client, opts }) {
       // A <video> plays what was decoded once it is remuxed and re-encoded.
       const needs = index ? [...needsOf(tracks, { ext: extensionOf(target) }), ...(tag.name === 'video' ? videoTailNeeds() : [])] : null;
       const element = tag.name === 'canvas' ? 'canvas' : tag.name;
-      const pipeline = index ? resolvePipeline(needs, index, { prefer: element === 'canvas' ? 'solver_1' : info.using, only }) : null;
+      const pipeline = index ? resolvePipeline(needs, index, { prefer: element === 'canvas' ? SOLVER : info.using, only }) : null;
       if (pipeline?.missing.length) {
         report.elements.push({ line, tag: tag.name, src, format: info.format, skipped: `nothing on this registry can ${pipeline.missing.map(describeNeed).join(', ')}${only ? ` with ${only}` : ''}` });
         continue;

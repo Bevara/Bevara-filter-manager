@@ -121,16 +121,16 @@ describe('verdict', () => {
 
 describe('accessor directory checks', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-runner-test-'));
-  test('findSolver prefers solver_1 and needs both files', () => {
+  test('findSolver prefers mm_solver_1.0.1 and needs both files', () => {
     assert.equal(findSolver(dir, 'video'), null);
-    fs.writeFileSync(path.join(dir, 'solver_minimal_1.js'), '');
+    fs.writeFileSync(path.join(dir, 'mm_solver_minimal_1.0.1.js'), '');
     assert.equal(findSolver(dir, 'image'), null, 'the .wasm is required too');
-    fs.writeFileSync(path.join(dir, 'solver_minimal_1.wasm'), '');
-    assert.equal(findSolver(dir, 'image'), 'solver_minimal_1');
-    fs.writeFileSync(path.join(dir, 'solver_1.js'), '');
-    fs.writeFileSync(path.join(dir, 'solver_1.wasm'), '');
-    assert.equal(findSolver(dir, 'image'), 'solver_1');
-    assert.equal(findSolver(dir, 'image', 'solver_minimal_1'), 'solver_minimal_1');
+    fs.writeFileSync(path.join(dir, 'mm_solver_minimal_1.0.1.wasm'), '');
+    assert.equal(findSolver(dir, 'image'), 'mm_solver_minimal_1.0.1');
+    fs.writeFileSync(path.join(dir, 'mm_solver_1.0.1.js'), '');
+    fs.writeFileSync(path.join(dir, 'mm_solver_1.0.1.wasm'), '');
+    assert.equal(findSolver(dir, 'image'), 'mm_solver_1.0.1');
+    assert.equal(findSolver(dir, 'image', 'mm_solver_minimal_1.0.1'), 'mm_solver_minimal_1.0.1');
     assert.equal(findSolver(dir, 'image', 'solver_nope'), null);
   });
 

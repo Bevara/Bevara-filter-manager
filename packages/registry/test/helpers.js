@@ -5,6 +5,7 @@ import * as tar from 'tar';
 import { createHash } from 'node:crypto';
 import { createApp } from '../src/app.js';
 import { generateKeyPair, signRecord, canonicalize } from '../src/sig.js';
+import { splitModule } from '../src/manifest.js';
 
 export const FIXTURE_WASM = fs.readFileSync(new URL('./fixtures/dummy_1.wasm', import.meta.url));
 
@@ -27,13 +28,16 @@ export async function startRegistry(config = {}) {
   return { app, base, api, close, dataDir };
 }
 
+// The base name of a package's files: <name>_<abi>, or <name>_<version> for a runtime.
+const fileBase = (m) => `${m.module ?? m.name.split(':').pop()}_${m.kind === 'runtime' ? m.version : m.abi ?? 1}`;
+
 // Builds a publish tarball in memory: package/bevara.json + package/<name>_<abi>.wasm (+ extras).
 export async function makeTarball(manifest, { wasm = FIXTURE_WASM, extra = {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-tgz-'));
   const pkg = path.join(dir, 'package');
   fs.mkdirSync(pkg);
   fs.writeFileSync(path.join(pkg, 'bevara.json'), JSON.stringify(manifest));
-  const base = `${manifest.module ?? manifest.name.split(':').pop()}_${manifest.abi ?? 1}`;
+  const base = fileBase(manifest);
   if (wasm) fs.writeFileSync(path.join(pkg, `${base}.wasm`), wasm);
   if (manifest.kind === 'runtime') fs.writeFileSync(path.join(pkg, `${base}.js`), extra.js ?? RUNTIME_JS);
   for (const [k, v] of Object.entries(extra)) {
@@ -45,11 +49,11 @@ export async function makeTarball(manifest, { wasm = FIXTURE_WASM, extra = {} } 
   return buf;
 }
 
-export const manifest = (over = {}) => ({ name: 'dummy', version: '1.0.0', abi: 1, description: 'Dummy decoder', filters: ['dummydec'], support: ['video'], formats: ['Dummy'], license: 'MIT', using: ['solver_1'], patents: { status: 'royalty-free' }, ...over });
+export const manifest = (over = {}) => ({ name: 'dummy', version: '1.0.0', abi: 1, description: 'Dummy decoder', filters: ['dummydec'], support: ['video'], formats: ['Dummy'], license: 'MIT', using: ['mm_solver_1.0.1'], patents: { status: 'royalty-free' }, ...over });
 
 // A runtime (solver): a main module and its JavaScript, kind "runtime".
 export const RUNTIME_JS = Buffer.from('var libgpac = () => {};\n');
-export const runtimeManifest = (over = {}) => ({ name: 'solver', version: '1.0.0', abi: 1, kind: 'runtime', description: 'Test solver', license: 'LGPL-2.1-or-later', builtins: ['fin', 'fout'], patents: { status: 'royalty-free' }, ...over });
+export const runtimeManifest = (over = {}) => ({ name: 'mm_solver', version: '1.0.1', abi: 1, kind: 'runtime', description: 'Test solver', license: 'LGPL-2.1-or-later', builtins: ['fin', 'fout'], patents: { status: 'royalty-free' }, ...over });
 
 // token -> signing key registered for that token's user
 export const keys = new Map();
@@ -76,8 +80,9 @@ export async function publish(api, token, m, { sign = true, record: override, ke
   if (runtimes && m.kind !== 'runtime') {
     const have = runtimesOf.get(api) ?? runtimesOf.set(api, new Set()).get(api);
     for (const u of Array.isArray(m.using) ? m.using : []) {
-      if (have.has(u) || !/^[a-z0-9][a-z0-9._-]*_\d+$/.test(u)) continue;
-      const r = await publish(api, token, runtimeManifest({ name: u.replace(/_\d+$/, '') }));
+      const id = splitModule(u);
+      if (have.has(u) || !id || !/^[a-z0-9]/.test(u)) continue;
+      const r = await publish(api, token, runtimeManifest({ name: id.base, version: id.version ?? '1.0.0', abi: id.abi }));
       if (r.status !== 201 && r.status !== 409) throw new Error(`runtime ${u}: ${JSON.stringify(r.data)}`);
       have.add(u);
     }
@@ -88,7 +93,7 @@ export async function publish(api, token, m, { sign = true, record: override, ke
   if (sign && key) {
     const wasm = opts.wasm ?? FIXTURE_WASM;
     const full = m.name.includes(':') ? m.name : `bevara:${m.name}`;
-    const record = { type: 'publish', name: full, version: m.version, abi: m.abi ?? 1, file: `${m.module ?? m.name.split(':').pop()}_${m.abi ?? 1}.wasm`, wasmSha256: sha(wasm), tarballSha256: sha(tarball),
+    const record = { type: 'publish', name: full, version: m.version, abi: m.abi ?? 1, file: `${fileBase(m)}.wasm`, wasmSha256: sha(wasm), tarballSha256: sha(tarball),
       ...(m.kind === 'runtime' ? { jsSha256: sha(opts.extra?.js ?? RUNTIME_JS) } : {}), keyId: key.keyId, timestamp: new Date().toISOString(), ...override };
     headers['x-bevara-record'] = Buffer.from(canonicalize(record)).toString('base64');
     headers['x-bevara-signature'] = signRecord(record, key.privateKey);

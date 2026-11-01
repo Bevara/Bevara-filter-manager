@@ -83,6 +83,11 @@ export function filterManifest(project, { buildDir: requested } = {}) {
       if (call && call.generation == null && call.rawGeneration) derived.notes.push(`the generation in CMakeLists.txt is "${call.rawGeneration}", which the CLI cannot evaluate`);
     }
   }
+  // A runtime's file name carries its whole version (mm_solver_1.0.1.wasm).
+  if (runtime && call?.version) {
+    if (m.version === undefined) { m.version = call.version; derived.version = `add_executable in CMakeLists.txt, line ${call.line}`; }
+    else if (m.version !== call.version) derived.notes.push(`CMakeLists.txt builds ${call.name}_${call.version}.wasm (line ${call.line}) but ${project.manifestName} has version ${m.version}: set the same version in both`);
+  }
   if (m.version === undefined && m.name) {
     m.version = `${m.abi ?? 1}.0.0`;
     derived.version = `generation ${m.abi ?? 1}`;
@@ -130,7 +135,7 @@ export function filterManifest(project, { buildDir: requested } = {}) {
     n.mainDefaulted = !m.main;
     n.mainCandidates = [n.main, ...(requested ? [] : FALLBACK_BUILD_DIRS)];
   } else if (!n.main && n.name) {
-    n.main = path.join(buildDir, accessorFileName(n.name, n.abi, n.module));
+    n.main = path.join(buildDir, accessorFileName(n.name, n.abi, n.module, runtime ? n.version : undefined));
     n.mainDefaulted = true;
     // With -B the user named the directory; otherwise hand-made builds count too.
     n.mainCandidates = [buildDir, ...(requested ? ['.'] : FALLBACK_BUILD_DIRS)].map((d) => path.join(d, path.basename(n.main)));
@@ -288,8 +293,9 @@ export async function packFilter(project, { outDir = project.root, dryRun = fals
   for (const n of derived.notes.slice(derived.notesShown ?? 0)) log.warn(n);
   add('bevara.json', Buffer.from(JSON.stringify(published, null, 2) + '\n'));
   if (tagScripts) for (const t of tagScripts) add(t.file, t.data);
-  else add(accessorFileName(m.name, m.abi, m.module), buf);
-  if (js) add(accessorFileName(m.name, m.abi, m.module).replace(/\.wasm$/, '.js'), js);
+  const mainFile = accessorFileName(m.name, m.abi, m.module, m.kind === 'runtime' ? m.version : undefined);
+  if (!tagScripts) add(mainFile, buf);
+  if (js) add(mainFile.replace(/\.wasm$/, '.js'), js);
   const extra = new Set([...ALWAYS_INCLUDE, ...(m.files ?? [])]);
   for (const rel of extra) {
     const src = path.resolve(project.root, rel);

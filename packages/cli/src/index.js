@@ -30,7 +30,7 @@ export const COMMANDS = {
   owner: { desc: 'Manage who can publish a filter', usage: '<add|rm|ls> [user] <filter>', mod: './commands/owner.js' },
   advisory: { desc: 'Manage security/quality advisories (admin)', usage: '<add|rm|ls> ...', mod: './commands/advisory.js' },
   log: { desc: 'Show or verify the registry transparency log', usage: '[filter] [--verify]', mod: './commands/log.js' },
-  key: { desc: 'Manage the Ed25519 key that signs your publishes', usage: '<generate|register|ls|revoke|show>', mod: './commands/key.js' },
+  key: { desc: 'Manage the Ed25519 key that signs the published filter', usage: '<generate|register|ls|revoke|show>', mod: './commands/key.js' },
   namespace: { alias: ['ns'], desc: 'List namespaces or manage their owners', usage: '<ls|add|rm> [user] [namespace]', mod: './commands/namespace.js' },
   login: { desc: 'Authenticate against the registry', mod: './commands/login.js' },
   logout: { desc: 'Forget the stored token', mod: './commands/login.js', fn: 'logout' },

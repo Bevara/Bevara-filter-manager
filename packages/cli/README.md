@@ -31,7 +31,7 @@ only needed to publish.
 bevara probe movie.mkv                  # what the file holds, and the accessors it needs
 bevara update-page index.html           # shows how <img>/<video>/<audio> would become universal tags
 bevara update-page index.html --write   # apply it: also writes the scripts, solver and accessors it loads
-bevara update-page index.html --tags art-player --using solver_1   # other tags than the universal ones, one runtime
+bevara update-page index.html --tags art-player --using mm_solver_1.0.1   # other tags than the universal ones, one runtime
 ```
 
 Or manage the accessors yourself:
@@ -46,7 +46,7 @@ bevara update                      # within the semver ranges; --latest to cross
 ```
 
 ```html
-<video is="universal-video_1" src="movie.ogv" using="solver_1"
+<video is="universal-video_1" src="movie.ogv" using="mm_solver_1.0.1"
        with="ogg_1;vorbis_1;theora_1" controls></video>
 ```
 
@@ -106,7 +106,7 @@ bevara bench clip.mp4 --accessors <dir> -W "isobmff_1;h264bsd_1" -W "isobmff_1;l
 ```
 
 These run the real pipeline and need the player's main module
-(`solver_1.js` and `solver_1.wasm`) in `<dir>`, next to the accessors.
+(`mm_solver_1.0.1.js` and `mm_solver_1.0.1.wasm`) in `<dir>`, next to the accessors.
 
 `bevara --help` lists every command; `bevara <command> --help` details one.
 

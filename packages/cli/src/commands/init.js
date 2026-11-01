@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prompt, log, color, CliError } from '../lib/ui.js';
-import { NAME_RE, SUPPORT_VALUES, PATENT_STATUSES } from '../lib/manifest.js';
+import { NAME_RE, SUPPORT_VALUES, PATENT_STATUSES, splitModule } from '../lib/manifest.js';
+import { SOLVER, SOLVER_MINIMAL } from '../lib/solvers.js';
 import { MANIFEST, writeJsonFile, filterManifestsIn } from '../lib/project.js';
 import { accessorFileName } from '../lib/wasm.js';
 
@@ -52,7 +53,7 @@ export async function run({ args, opts }) {
   const patentStatus = opts.patents ?? await ask(`Patent status of the format (${PATENT_STATUSES.join(', ')})`, 'under-review', { validate: (v) => (PATENT_STATUSES.includes(v) ? null : `one of ${PATENT_STATUSES.join(', ')}`) });
   // Required to publish: the runtimes (solvers) the module links against, each
   // published on the registry (a registry may carry several, per environment).
-  const using = await ask('Runtimes it links against, as pages name them (comma separated)', 'solver_1', { validate: (v) => (v.split(',').map((x) => x.trim()).filter(Boolean).every((u) => /^[A-Za-z0-9][A-Za-z0-9._-]*_\d+$/.test(u)) ? null : 'e.g. solver_1, solver_minimal_1') });
+  const using = await ask('Runtimes it links against, as pages name them (comma separated)', SOLVER, { validate: (v) => (v.split(',').map((x) => x.trim()).filter(Boolean).every((u) => splitModule(u)) ? null : `e.g. ${SOLVER}, ${SOLVER_MINIMAL}`) });
   const split = (s) => s.split(',').map((x) => x.trim()).filter(Boolean);
 
   // Same shape and indentation as the existing filter repositories' manifests

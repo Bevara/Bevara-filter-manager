@@ -12,7 +12,7 @@ import { Ledger } from './ledger.js';
 import { Stats } from './stats.js';
 import { extractTarball } from './tarball.js';
 import { inspectWasm, accessorFileName } from './wasm.js';
-import { validateManifest, normalizeManifest, publicManifest, patentNotice, NAME_RE, PART_RE, fullName, splitName, shortName } from './manifest.js';
+import { validateManifest, normalizeManifest, publicManifest, patentNotice, NAME_RE, PART_RE, fullName, splitName, shortName, splitModule } from './manifest.js';
 import { verifyRecord, keyIdOf, canonicalize } from './sig.js';
 import { Router, HttpError, json, html, redirect, readBody, readJson, readForm, sendFile, bearer } from './http.js';
 import { catalogPage, loginFormPage, tokenPage } from './ui.js';
@@ -55,7 +55,7 @@ export function createApp(config = {}) {
   const router = new Router();
 
   // "theora_1.wasm" -> "theora": the name a page uses, without its generation, any case.
-  const accessorKey = (file) => file.replace(/_\d+\.(wasm|js)$/, '').toLowerCase();
+  const accessorKey = (file) => file.replace(/_\d+(?:\.\d+\.\d+)?\.(wasm|js)$/, '').toLowerCase();
 
   /* Namespaces that must exist whatever happened before: the default one, so
    * that administrators can grant it (bevara namespace add <user> bevara), and
@@ -406,6 +406,7 @@ export function createApp(config = {}) {
 
   // ------------------------------------------------- accessors for players
   // /accessors/theora_1.wasm                     -> latest of bevara:theora (default namespace) with abi 1
+  // /accessors/mm_solver_1.0.1.js                -> a runtime, whose file names its version
   // /accessors/acme:theora_1.wasm                -> another namespace
   // /accessors/bevara:theora/1.2.0/theora_1.wasm -> exact version
   const JS_TYPE = 'text/javascript; charset=utf-8';
@@ -502,8 +503,8 @@ export function createApp(config = {}) {
   });
 
   router.get('/accessors/:file', async (req, res, { params }) => {
-    const m = /^((?:[a-z0-9][a-z0-9._-]*:)?[A-Za-z0-9][A-Za-z0-9._-]*)_(\d+)\.(wasm|js)$/.exec(params.file);
-    if (!m) throw new HttpError(404, 'accessor not found (expected [namespace:]<module>_<abi>.wasm, or .js for a runtime or a tag script)');
+    const m = /^((?:[a-z0-9][a-z0-9._-]*:)?[A-Za-z0-9][A-Za-z0-9._-]*)_(\d+(?:\.\d+\.\d+)?)\.(wasm|js)$/.exec(params.file);
+    if (!m) throw new HttpError(404, 'accessor not found (expected [namespace:]<module>_<abi>.wasm, <runtime>_<x.y.z>.wasm|.js, or a tag script)');
     // The file name carries the module name, which equals the package name up
     // to case (libOpenVVC_1.wasm -> bevara:libopenvvc) - except for the scripts
     // of a tags package (universal-img_1.js in bevara:universal-tags), found
@@ -511,8 +512,11 @@ export function createApp(config = {}) {
     // in the URL but never appears in the stored file name.
     const wanted = `${shortName(m[1])}_${m[2]}.${m[3]}`;
     const reserved = !m[1].includes(':') && db.prepare('SELECT name FROM accessor_names WHERE key = ?').get(accessorKey(wanted))?.name;
-    const row = latestFor(reserved || validName(m[1].toLowerCase()), { abi: parseInt(m[2], 10) });
-    if (!row) throw new HttpError(404, `no published version of "${m[1]}" with abi ${m[2]}`);
+    // A runtime's file names its version: that one, deprecated or not.
+    const pkg = reserved || validName(m[1].toLowerCase());
+    const pinned = m[2].includes('.');
+    const row = pinned ? q.version.get(pkg, m[2]) : latestFor(pkg, { abi: parseInt(m[2], 10) });
+    if (!row) throw new HttpError(404, pinned ? `no version ${m[2]} of "${m[1]}" is published` : `no published version of "${m[1]}" with abi ${m[2]}`);
     const f = filesOf(row).find((x) => x.file === wanted);
     if (!f) throw new HttpError(404, m[3] === 'js' ? `${row.name} has no ${wanted}` : `this accessor is published as ${row.wasm_file}`);
     q.bumpDownloads.run(row.name, row.version);
@@ -544,7 +548,7 @@ export function createApp(config = {}) {
     const tagFiles = tagsPkg ? manifest.tags.map((t) => ({ file: t, data: files.get(`package/${t}`) })) : [];
     for (const t of tagFiles) if (!t.data) throw new HttpError(400, `tarball must contain package/${t.file}`);
     if (tagsPkg && manifest.abi !== parseInt(/_(\d+)\.js$/.exec(manifest.tags[0])[1], 10)) throw new HttpError(400, `"abi" (${manifest.abi}) is not the generation of the scripts (${manifest.tags[0]})`);
-    const wasmName = tagsPkg ? manifest.tags[0] : accessorFileName(name, manifest.abi, manifest.module);
+    const wasmName = tagsPkg ? manifest.tags[0] : accessorFileName(name, manifest.abi, manifest.module, manifest.kind === 'runtime' ? manifest.version : undefined);
     const wasm = files.get(`package/${wasmName}`);
     if (!wasm) throw new HttpError(400, `tarball must contain package/${wasmName}`);
     const info = tagsPkg ? { exports: [], imports: [], dylink: null, customSections: [] } : inspectWasm(wasm);
@@ -561,21 +565,22 @@ export function createApp(config = {}) {
     if (runtime && !js) throw new HttpError(400, `a runtime must contain package/${jsName} next to package/${wasmName}`);
     const jsSha = js ? sha256(js).toString('hex') : null;
 
-    /* The solvers a filter links against: a page loads using="solver_minimal_1"
+    /* The solvers a filter links against: a page loads using="mm_solver_minimal_1.0.1"
      * from the same place as the accessors, so at least one of them must be a
      * runtime published here. A registry may carry several runtimes (one per
      * environment); those it lacks are only reported. */
     if (!runtime && !tagsPkg) {
       const published = [], lacking = [];
       for (const u of manifest.using ?? []) {
-        const holder = db.prepare('SELECT name FROM accessor_names WHERE key = ?').get(u.replace(/_\d+$/, '').toLowerCase())?.name;
-        const row = holder && latestFor(holder, { abi: parseInt(/_(\d+)$/.exec(u)[1], 10) });
+        const id = splitModule(u);
+        const holder = db.prepare('SELECT name FROM accessor_names WHERE key = ?').get(id.base.toLowerCase())?.name;
+        const row = holder && (id.version ? q.version.get(holder, id.version) : latestFor(holder, { abi: id.abi }));
         if (row && isRuntime(row)) published.push(u);
         else lacking.push({ u, why: row ? `${holder} is an accessor, not a runtime` : 'not published here' });
       }
       if (!published.length) {
         throw new HttpError(400, `none of the runtimes in "using" (${(manifest.using ?? []).join(', ')}) is published on this registry`, {
-          hint: `publish one of them first (bevara publish --build in its directory, e.g. Editor/Interface/player/${(manifest.using?.[0] ?? 'solver_1').replace(/_\d+$/, '')})${lacking.some((l) => l.why !== 'not published here') ? `; ${lacking.filter((l) => l.why !== 'not published here').map((l) => l.why).join('; ')}` : ''}`,
+          hint: `publish one of them first (bevara publish --build in its directory, e.g. Editor/Interface/player/solver for mm_solver, solver_minimal for mm_solver_minimal)${lacking.some((l) => l.why !== 'not published here') ? `; ${lacking.filter((l) => l.why !== 'not published here').map((l) => l.why).join('; ')}` : ''}`,
         });
       }
       for (const l of lacking) warnings.push(`"using" names ${l.u}: ${l.why}; pages using it cannot load this accessor from this registry`);

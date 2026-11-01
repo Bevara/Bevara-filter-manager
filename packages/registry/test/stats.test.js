@@ -41,7 +41,7 @@ describe('usage statistics (administrators\' dashboard)', () => {
     assert.equal((await api('GET', '/accessors/dummy_1.wasm')).status, 200);
     assert.equal((await api('HEAD', '/accessors/dummy_1.wasm')).status, 200);
     assert.equal((await api('GET', '/accessors/bevara%3Adummy/1.0.0/dummy_1.wasm')).status, 200);
-    assert.equal((await api('GET', '/accessors/solver_1.js')).status, 200);
+    assert.equal((await api('GET', '/accessors/mm_solver_1.0.1.js')).status, 200);
     assert.equal((await api('GET', '/accessors/index.json')).status, 200);
     assert.equal((await api('GET', '/filters?q=dummy')).status, 200);
     assert.equal((await api('GET', '/filters/dummy')).status, 200);
@@ -72,7 +72,7 @@ describe('usage statistics (administrators\' dashboard)', () => {
     assert.equal(dummy.downloadsAllTime, 5);                   // the old counter also counts the HEAD
     assert.deepEqual(dummy.owners, ['alice']);
     assert.equal(r.data.packages[0].name, 'bevara:dummy');     // most downloaded first
-    assert.equal(r.data.packages.find((p) => p.name === 'bevara:solver').kind, 'runtime');
+    assert.equal(r.data.packages.find((p) => p.name === 'bevara:mm_solver').kind, 'runtime');
     assert.equal(r.data.channelsByKind.runtime.accessorLatest, 1);
     assert.deepEqual(r.data.totals.byKind, { filter: 1, runtime: 1, tags: 0 });
     assert.equal(r.data.totals.users, 2);

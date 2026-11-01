@@ -419,7 +419,7 @@ no Format and is therefore looked up by name, still only when published.
 A side module links only against a solver that exports what it imports, and a
 page loads a single solver. Each manifest lists the solvers it works with
 (`"using"`, absent = any); resolution tries the preferred solver of the element
-(`solver_minimal_1` for images and audio, `solver_1` for a canvas, as in the
+(`mm_solver_minimal_1.0.1` for images and audio, `mm_solver_1.0.1` for a canvas, as in the
 editor), then the others, and keeps the first under which every need has an
 accessor. Accessors that cannot share a solver are reported as a conflict, not
 as a missing codec. `update-page` picks one solver for the whole page, keeping
@@ -489,7 +489,7 @@ because `is=` does nothing without it.
 ## 10. Running real pipelines: test and bench
 
 **D10.1 — The real solver runs in Node.**
-`solver_1.js` is an Emscripten MAIN_MODULE exported through `module.exports`;
+`mm_solver_1.0.1.js` is an Emscripten MAIN_MODULE exported through `module.exports`;
 accessors are loaded as `dynamicLibraries` and self-register through their
 constructors; built-in filters (`fin`, `fout`, `writegen`…) are registered from
 JavaScript with `gf_filter_auto_register`; `main(argc, argv)` receives
@@ -514,8 +514,8 @@ decoders processed packets and output exists.
 **D10.5 — Measurements come from GPAC's own accounting.**
 `bench` reports linking (instantiating the solver and the side modules), the
 decoder's process time as GPAC accounts it per filter, and the session's wall
-clock, as medians over several runs after a warm-up. `solver_1` is preferred
-because `solver_minimal_1` prints no statistics.
+clock, as medians over several runs after a warm-up. `mm_solver_1.0.1` is preferred
+because `mm_solver_minimal_1.0.1` prints no statistics.
 
 **D10.6 — The solver is not distributed by the registry.**
 It is the player's main module, not an accessor; `test` and `bench` look for it

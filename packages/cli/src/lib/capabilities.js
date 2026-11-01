@@ -75,12 +75,13 @@ function fits(entry, need) {
 
 /* An accessor is a side module: it links against the solver the page loads
  * (using="…"), and only some solvers export what it imports - isobmff needs
- * solver_1, libtta solver_minimal_1. Its manifest says which in "using"; an
+ * mm_solver_1.0.1, libtta mm_solver_minimal_1.0.1. Its manifest says which in "using"; an
  * accessor that does not say is taken to work with any. */
 export const fitsSolver = (entry, solver) => !entry.using?.length || entry.using.includes(solver);
 
-// The solvers the player ships, most capable for the fewest bytes first.
-export const KNOWN_SOLVERS = ['solver_minimal_1', 'solver_1'];
+import { KNOWN_SOLVERS } from './solvers.js';
+
+export { SOLVER, SOLVER_MINIMAL, KNOWN_SOLVERS, solverDir } from './solvers.js';
 
 /* The GPAC priority that matters for a need (lower is preferred): that of the
  * accessor's filter doing the work - for a decode, the one that outputs raw

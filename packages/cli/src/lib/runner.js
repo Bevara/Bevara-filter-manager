@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { CliError } from './ui.js';
+import { SOLVER, SOLVER_MINIMAL } from './solvers.js';
 
 const RUNNER = path.join(path.dirname(fileURLToPath(import.meta.url)), 'run-session.cjs');
 
@@ -16,9 +17,9 @@ const RUNNER = path.join(path.dirname(fileURLToPath(import.meta.url)), 'run-sess
  * distributes accessors, not the solver, so we look for it where the page
  * would load it from. */
 export function findSolver(dir, kind, forced, allowed = null) {
-  // solver_1 first: solver_minimal_1 runs the same pipelines but prints no
+  // mm_solver first: mm_solver_minimal runs the same pipelines but prints no
   // session statistics, so a report made from it would have no per-filter data.
-  const prefer = forced ? [forced] : [...new Set(['solver_1', 'solver_minimal_1', ...(allowed ?? [])])].filter((s) => !allowed || allowed.includes(s));
+  const prefer = forced ? [forced] : [...new Set([SOLVER, SOLVER_MINIMAL, ...(allowed ?? [])])].filter((s) => !allowed || allowed.includes(s));
   for (const s of prefer) if (fs.existsSync(path.join(dir, `${s}.js`)) && fs.existsSync(path.join(dir, `${s}.wasm`))) return s;
   return null;
 }
@@ -54,7 +55,7 @@ export function solverForCombination(dir, kind, forced, modules) {
   const solver = findSolver(dir, kind, forced, rt.common);
   if (!solver) {
     throw new CliError(`${forced ? `solver "${forced}"` : rt.common ? `no runtime among ${rt.common.join(', ')}` : 'no solver'} found in ${dir}`, {
-      hint: 'the solver is the player\'s main module: install it (bevara install bevara:solver_1), or copy <solver>.js/.wasm next to the accessors',
+      hint: 'the solver is the player\'s main module: install it (bevara install bevara:mm_solver), or copy <solver>.js/.wasm next to the accessors',
     });
   }
   return { solver, ...rt };
@@ -63,7 +64,7 @@ export function solverForCombination(dir, kind, forced, modules) {
 export function requireSolver(dir, kind, forced) {
   const solver = findSolver(dir, kind, forced);
   if (!solver) throw new CliError(`${forced ? `solver "${forced}" not found` : 'no solver found'} in ${dir}`, {
-    hint: 'the solver is the player\'s main module, not an accessor: copy solver_1.js/.wasm (and solver_minimal_1) next to the accessors, or pass --accessors <dir>',
+    hint: `the solver is the player's main module, not an accessor: copy ${SOLVER}.js/.wasm (and ${SOLVER_MINIMAL}) next to the accessors, or pass --accessors <dir>`,
   });
   return solver;
 }

@@ -86,7 +86,7 @@ describe('registry', () => {
     assert.equal(r.data.name, 'bevara:dummy');
     assert.equal(r.data.dist.file, 'dummy_1.wasm');
     assert.equal(r.data.signature.keyId, keys.get(alice).keyId);
-    // Entry #1 is the runtime solver_1 that "using" names, published first.
+    // Entry #1 is the runtime mm_solver_1.0.1 that "using" names, published first.
     assert.equal(r.data.signature.logSeq, 2);
     assert.equal(r.data.checkpoint.seq, 2);
     const sha = createHash('sha256').update(FIXTURE_WASM).digest('base64');
@@ -379,13 +379,13 @@ describe('administrators and namespaces on an existing registry', () => {
     const reg = await startRegistry();
     try {
       const tok = await signup(reg.api, 'root');
-      assert.equal((await publish(reg.api, tok, manifest({ name: 'extdec', extension: { xyz: 'img' }, using: ['solver_1'] }))).status, 201);
+      assert.equal((await publish(reg.api, tok, manifest({ name: 'extdec', extension: { xyz: 'img' }, using: ['mm_solver_1.0.1'] }))).status, 201);
       const idx = await reg.api('GET', '/accessors/index.json');
       const e = idx.data.filters.find((f) => f.file === 'extdec_1.wasm');
       assert.deepEqual(e.extension, { xyz: 'img' });
-      assert.deepEqual(e.using, ['solver_1']);
+      assert.deepEqual(e.using, ['mm_solver_1.0.1']);
       assert.equal((await publish(reg.api, tok, manifest({ name: 'badext', extension: ['xyz'] }))).status, 400);
-      assert.equal((await publish(reg.api, tok, manifest({ name: 'badusing', using: 'solver_1' }))).status, 400);
+      assert.equal((await publish(reg.api, tok, manifest({ name: 'badusing', using: 'mm_solver_1.0.1' }))).status, 400);
       assert.equal((await publish(reg.api, tok, manifest({ name: 'badusing', using: ['solver'] }))).status, 400);
     } finally { await reg.close(); }
   });
@@ -547,49 +547,59 @@ describe('runtimes (solvers) as packages', () => {
   after(() => reg.close());
 
   test('a filter cannot be published before the runtime its "using" names', async () => {
-    const r = await publish(reg.api, alice, manifest({ name: 'early', filters: ['earlydec'], using: ['solver_minimal_1'] }), { runtimes: false });
+    const r = await publish(reg.api, alice, manifest({ name: 'early', filters: ['earlydec'], using: ['mm_solver_minimal_1.0.1'] }), { runtimes: false });
     assert.equal(r.status, 400);
-    assert.match(r.data.error, /none of the runtimes in "using" \(solver_minimal_1\) is published/);
+    assert.match(r.data.error, /none of the runtimes in "using" \(mm_solver_minimal_1.0.1\) is published/);
     const none = await publish(reg.api, alice, manifest({ name: 'nousing', filters: ['nousingdec'], using: undefined }), { runtimes: false });
     assert.equal(none.status, 400);
     assert.ok(none.data.errors.some((e) => /"using" must list the runtimes/.test(e)));
   });
 
   test('any account publishes a runtime; its owners only publish new versions', async () => {
-    const r = await publish(reg.api, bob, runtimeManifest({ name: 'solver_minimal' }));
+    const r = await publish(reg.api, bob, runtimeManifest({ name: 'mm_solver_minimal' }));
     assert.equal(r.status, 201, JSON.stringify(r.data));
-    const other = await publish(reg.api, alice, runtimeManifest({ name: 'solver_minimal', version: '1.0.1' }));
+    const other = await publish(reg.api, alice, runtimeManifest({ name: 'mm_solver_minimal', version: '1.0.2' }));
     assert.equal(other.status, 403);
     // A runtime has the .js too, and no "using".
-    const bad = await publish(reg.api, bob, runtimeManifest({ name: 'solver_bad', using: ['solver_1'] }));
+    const bad = await publish(reg.api, bob, runtimeManifest({ name: 'mm_solver_bad', using: ['mm_solver_1.0.1'] }));
     assert.equal(bad.status, 400);
   });
 
   test('then the filter publishes, and pages get the solver from /accessors/ as .js and .wasm', async () => {
     // One published runtime is enough; the others are reported.
-    const r = await publish(reg.api, alice, manifest({ name: 'early', filters: ['earlydec'], using: ['solver_minimal_1', 'solver_other_1'] }), { runtimes: false });
+    const r = await publish(reg.api, alice, manifest({ name: 'early', filters: ['earlydec'], using: ['mm_solver_minimal_1.0.1', 'solver_other_1'] }), { runtimes: false });
     assert.equal(r.status, 201, JSON.stringify(r.data));
     assert.ok(r.data.warnings.some((w) => /solver_other_1: not published here/.test(w)));
-    const js = await reg.api('GET', '/accessors/solver_minimal_1.js');
+    const js = await reg.api('GET', '/accessors/mm_solver_minimal_1.0.1.js');
     assert.equal(js.status, 200);
     assert.match(js.headers.get('content-type'), /javascript/);
     assert.equal(js.data, RUNTIME_JS.toString());
-    assert.equal((await reg.api('GET', '/accessors/solver_minimal_1.wasm')).status, 200);
+    assert.equal((await reg.api('GET', '/accessors/mm_solver_minimal_1.0.1.wasm')).status, 200);
     assert.equal((await reg.api('GET', '/accessors/early_1.js')).status, 404);
-    const doc = await reg.api('GET', '/filters/solver_minimal/1.0.0');
+    const doc = await reg.api('GET', '/filters/mm_solver_minimal/1.0.1');
     assert.equal(doc.data.kind, 'runtime');
-    assert.equal(doc.data.dist.jsFile, 'solver_minimal_1.js');
+    assert.equal(doc.data.dist.jsFile, 'mm_solver_minimal_1.0.1.js');
     assert.equal((await reg.api('GET', doc.data.dist.js.replace(reg.base, ''))).status, 200);
   });
 
   test('the index lists runtimes apart from accessors', async () => {
     const { data } = await reg.api('GET', '/accessors/index.json');
-    assert.deepEqual(data.runtimes.map((r) => [r.module, r.js]), [['solver_minimal_1', 'solver_minimal_1.js']]);
-    assert.ok(!data.filters.some((f) => f.name === 'bevara:solver_minimal'));
+    assert.deepEqual(data.runtimes.map((r) => [r.module, r.js]), [['mm_solver_minimal_1.0.1', 'mm_solver_minimal_1.0.1.js']]);
+    assert.ok(!data.filters.some((f) => f.name === 'bevara:mm_solver_minimal'));
     assert.ok(data.filters.some((f) => f.name === 'bevara:early'));
     // A runtime's name is an accessor name like any other: no filter can take it.
-    const clash = await publish(reg.api, alice, manifest({ name: 'solver_minimal', filters: ['x'], using: ['solver_minimal_1'] }), { runtimes: false });
+    const clash = await publish(reg.api, alice, manifest({ name: 'mm_solver_minimal', filters: ['x'], using: ['mm_solver_minimal_1.0.1'] }), { runtimes: false });
     assert.equal(clash.status, 403);
+  });
+
+  test('a runtime file names its version: each version is served under its own name', async () => {
+    assert.equal((await publish(reg.api, bob, runtimeManifest({ name: 'mm_solver_minimal', version: '1.0.2' }))).status, 201);
+    assert.equal((await reg.api('GET', '/accessors/mm_solver_minimal_1.0.2.js')).headers.get('x-bevara-version'), '1.0.2');
+    assert.equal((await reg.api('GET', '/accessors/mm_solver_minimal_1.0.1.wasm')).headers.get('x-bevara-version'), '1.0.1');
+    assert.equal((await reg.api('GET', '/accessors/mm_solver_minimal_1.0.9.js')).status, 404);
+    // "using" names a version: one that is not published is no runtime of this registry.
+    const r = await publish(reg.api, alice, manifest({ name: 'pinned', filters: ['pinneddec'], using: ['mm_solver_minimal_1.0.9'] }), { runtimes: false });
+    assert.equal(r.status, 400);
   });
 });
 

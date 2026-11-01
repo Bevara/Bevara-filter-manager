@@ -9,7 +9,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-mp4pkg-'));
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 const put = (name, data) => { const p = path.join(dir, name); fs.writeFileSync(p, data); return p; };
-const page = '<!DOCTYPE html><img is="universal-img_1" src="photo.jxl" using="solver_minimal_1" with="libjxl_1">';
+const page = '<!DOCTYPE html><img is="universal-img_1" src="photo.jxl" using="mm_solver_minimal_1.0.1" with="libjxl_1">';
 const wasm = Buffer.concat([Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]), Buffer.alloc(3000, 7)]);
 const media = Buffer.from(Array.from({ length: 70000 }, (_, i) => i % 251));
 const items = [

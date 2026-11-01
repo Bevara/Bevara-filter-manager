@@ -27,7 +27,7 @@ bevara publish
 ## Use in a page
 
 ```html
-<video is="universal-video_1" src="movie.ext" using="solver_1" with="{{NAME}}_1" controls></video>
+<video is="universal-video_1" src="movie.ext" using="mm_solver_1.0.1" with="{{NAME}}_1" controls></video>
 ```
 
 or install it in a site project with `bevara install {{NAME}}`.

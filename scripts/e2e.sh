@@ -29,15 +29,15 @@ $BEVARA ping
 $BEVARA adduser -u alice -e alice@example.org
 $BEVARA whoami | grep -q alice
 
-step "publish the runtime solver_1 that filters name in \"using\" (required, and checked by the registry)"
+step "publish the runtime mm_solver_1.0.1 that filters name in \"using\" (required, and checked by the registry)"
 mkdir -p "$WORK/solver" && cd "$WORK/solver"
 printf '{ "name": "solver", "kind": "runtime", "description": "Test solver", "patents": { "status": "royalty-free" } }\n' > solver.json
 printf 'cmake_minimum_required(VERSION 3.7)\nset(VERSION "1")\nadd_executable(solver_${VERSION} gpac.c)\n' > CMakeLists.txt
 printf 'Module._fin_register; Module._fout_register;\n' > loader.js
 printf 'SPDX-License-Identifier: LGPL-2.1-or-later\n' > LICENCE
-mkdir -p .bevara/.build && cp "$FIXTURE" .bevara/.build/solver_1.wasm && printf 'var libgpac=()=>{};\n' > .bevara/.build/solver_1.js
+mkdir -p .bevara/.build && cp "$FIXTURE" .bevara/.build/mm_solver_1.0.1.wasm && printf 'var libgpac=()=>{};\n' > .bevara/.build/mm_solver_1.0.1.js
 $BEVARA publish -y | grep 'runtime with built-in filters fin, fout' >/dev/null
-curl -fs -o /dev/null -w '%{http_code} %{content_type}\n' "$BEVARA_REGISTRY/accessors/solver_1.js" | grep -q '200 text/javascript'
+curl -fs -o /dev/null -w '%{http_code} %{content_type}\n' "$BEVARA_REGISTRY/accessors/mm_solver_1.0.1.js" | grep -q '200 text/javascript'
 
 step "publish the tag scripts (kind \"tags\"), then list them with bevara tags"
 mkdir -p "$WORK/player/build/dist" && cd "$WORK/player"
@@ -78,7 +78,7 @@ $BEVARA publish -y
 
 step "catalog: filters --remote / runtimes --remote / search / info"
 $BEVARA filters --remote | grep -q dummy
-$BEVARA runtimes --remote | grep -q 'solver_1'
+$BEVARA runtimes --remote | grep -q 'mm_solver_1.0.1'
 $BEVARA search second | grep -q second
 $BEVARA info second | grep -q 'dummy@^1.0.0'
 $BEVARA info second | grep -q 'log #'
@@ -150,7 +150,7 @@ cat > legacy.json <<'JSON'
     "sources":"https://github.com/Bevara/legacy",
     "Format": ["Legacy"],
     "patents": { "status": "royalty-free" },
-    "using": ["solver_1"]
+    "using": ["mm_solver_1.0.1"]
 }
 JSON
 mkdir -p build && cp "$FIXTURE" build/legacy_1.wasm
@@ -233,7 +233,7 @@ check grep -q 'universal-video_1' "$WORK/page.out"
 check grep -q 'run again with' "$WORK/page.out"
 check grep -vq 'universal' index.html
 $BEVARA update-page index.html --offline --write >/dev/null
-check grep -q 'is="universal-img_1" using="solver_minimal_1" with="libpng_1"' index.html
+check grep -q 'is="universal-img_1" using="mm_solver_minimal_1.0.1" with="libpng_1"' index.html
 check grep -q 'with="ogg_1;theora_1;vorbis_1;isobmff_1;libx264_1;libopusenc_1"' index.html
 check grep -q '<script src="scripts/universal-video_1.js">' index.html
 # The comment and the inline script must be untouched, and a second run is a no-op.

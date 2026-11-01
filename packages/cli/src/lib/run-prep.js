@@ -16,6 +16,7 @@ import { mediaTracks } from './mediainfo.js';
 import { needsOf, resolvePipeline, describeNeed, commonRuntimes, publishedRuntimes, elementFor } from './capabilities.js';
 import { extensionOf } from './formats.js';
 import { locateSources, deployFiles } from './page-files.js';
+import { SOLVER } from './solvers.js';
 
 export const cacheDir = (registry, env = process.env) =>
   path.join(env.BEVARA_CACHE ?? path.join(os.homedir(), '.bevara', 'cache'), new URL(registry).host.replace(/[^A-Za-z0-9.-]/g, '_'));
@@ -40,8 +41,8 @@ const KIND_OF_ELEMENT = { canvas: 'video', video: 'video', img: 'image', audio: 
 export async function registryCombinations(file, index, opts) {
   const tracks = await mediaTracks(file, await readSource(file));
   const needs = needsOf(tracks, { ext: extensionOf(file) });
-  // solver_1 first: it reports the per-filter statistics the reports show.
-  const match = resolvePipeline(needs, index, { prefer: opts.solver ?? 'solver_1' });
+  // mm_solver first: it reports the per-filter statistics the reports show.
+  const match = resolvePipeline(needs, index, { prefer: opts.solver ?? SOLVER });
   const kind = await mediaKind(file, tracks, match);
   if (opts.with?.length) return { combinations: opts.with.map((w) => w.split(/[;,\s]+/).filter(Boolean)), kind };
   if (match.missing.length) throw new CliError(`nothing on the registry can ${match.missing.map(describeNeed).join(', ')}`, { hint: 'bevara probe shows what the file holds; -W "a_1;b_1" names a combination to try' });

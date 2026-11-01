@@ -26,7 +26,7 @@ The existing manifests are published as they are:
     "support": ["image"],             // image | audio | video | canvas | text | subtitle | container
     "Format": ["JPEG XL"],            // MediaInfo format names handled; read as "formats" by the registry
     "extension": { "jxl": "img" },    // file extensions read, and the element that shows them
-    "using": ["solver_minimal_1", "solver_1"],   // solvers the module links against (default: any)
+    "using": ["mm_solver_minimal_1.0.1", "mm_solver_1.0.1"],   // solvers the module links against (default: any)
     "patents": { "status": "royalty-free", "checked": "2026-10-16" },   // see "Patent status" below
     "sources": "https://github.com/Bevara/libjxl",
     "filter_source": { "jxldec": "dec_jxl.c", "rfjxl": "reframe_jxl.c" }
@@ -43,7 +43,7 @@ names MediaInfo gives.
 **`using` lists the solvers the module links against.** An accessor is a side
 module: the solver a page loads (`using="…"`) must export every symbol it
 imports, and the two solvers differ — `isobmff` imports GPAC functions only
-`solver_1` has, `libtta` needs `invoke_*` trampolines only `solver_minimal_1`
+`mm_solver_1.0.1` has, `libtta` needs `invoke_*` trampolines only `mm_solver_minimal_1.0.1`
 defines. A page loads one solver (the loader keeps the first), so `probe` and
 `update-page` pick one that every chosen accessor lists, and report the
 accessors that cannot share one. Without `using`, a module is taken to work with
@@ -235,7 +235,7 @@ the signing key id and log position of each version, and the last verified log c
 (`"log": {seq, head, registryKeyId}`) that `bevara audit` extends on every run.
 
 ```html
-<video is="universal-video_1" src="movie.ogv" using="solver_1" with="ogg_1;theora_1" controls></video>
+<video is="universal-video_1" src="movie.ogv" using="mm_solver_1.0.1" with="ogg_1;theora_1" controls></video>
 ```
 
 ## Registry URLs used by players

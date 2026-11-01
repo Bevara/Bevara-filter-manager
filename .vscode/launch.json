@@ -159,7 +159,7 @@
     {
       "id": "accessorsDir",
       "type": "promptString",
-      "description": "directory holding solver_1.js/.wasm and the accessor .wasm files",
+      "description": "directory holding mm_solver_1.0.1.js/.wasm and the accessor .wasm files",
       "default": "${workspaceFolder}/../Showcase/accessors"
     },
     {

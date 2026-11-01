@@ -8,6 +8,7 @@ import { RegistryError, assertRegistryVersion } from '../lib/registry-client.js'
 import { ensureKey } from './key.js';
 import { signRecord, canonicalize } from '../lib/sig.js';
 import { accessorFileName, inspectWasm } from '../lib/wasm.js';
+import { solverDir } from '../lib/solvers.js';
 
 export const options = { build: { type: 'boolean', short: 'b' }, 'build-dir': { type: 'string', short: 'B' }, 'dry-run': { type: 'boolean' }, tag: { type: 'string' }, 'no-sign': { type: 'boolean' } };
 export const help = `Packs the filter in the current directory - its manifest (libjxl.json in the
@@ -54,7 +55,7 @@ export async function run({ args, opts }) {
     try { runtimes = (await client.get('/accessors/index.json', { auth: false })).runtimes ?? null; } catch { /* checked by the registry at upload */ }
     if (runtimes) {
       const missing = using.filter((u) => !runtimes.some((r) => r.module === u));
-      const hint = `publish a runtime first: bevara publish --build in its directory (Editor/Interface/player/${missing[0]?.replace(/_\d+$/, '')}); published runtimes: ${runtimes.map((r) => r.module).join(', ') || 'none'}`;
+      const hint = `publish a runtime first: bevara publish --build in its directory (Editor/Interface/player/${solverDir(missing[0])}); published runtimes: ${runtimes.map((r) => r.module).join(', ') || 'none'}`;
       if (missing.length === using.length) {
         const e = new CliError(`none of the runtimes in "using" (${using.join(', ')}) is published on ${registry}`, { hint });
         if (!opts['dry-run']) throw e;
@@ -88,7 +89,7 @@ export async function run({ args, opts }) {
       // Registering is idempotent: it also repairs a key the registry no longer
       // knows (a reset database, another registry behind the same URL).
       const key = await ensureKey(client, registry);
-      const wasmFile = m.kind === 'tags' ? m.tags[0] : accessorFileName(m.name, m.abi, m.module);
+      const wasmFile = m.kind === 'tags' ? m.tags[0] : accessorFileName(m.name, m.abi, m.module, m.kind === 'runtime' ? m.version : undefined);
       const record = {
         type: 'publish', name: fullName, version: m.version, abi: m.abi, file: wasmFile,
         wasmSha256: createHash('sha256').update(r.wasmBuffer).digest('hex'),

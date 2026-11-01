@@ -43,7 +43,7 @@ export async function run({ args, opts }) {
     console.log(`\n${color.red('Advisories:')}`);
     for (const a of p.advisories) console.log(`  ${color.bold(a.severity)} ${a.range}: ${a.title}${a.url ? ' ' + color.dim(a.url) : ''}`);
   }
-  console.log(color.dim(`\n<video is="universal-video_1" using="solver_1" with="${v.dist.file.replace(/\.wasm$/, '')}" src="…">`));
+  console.log(color.dim(`\n<video is="universal-video_1" using="mm_solver_1.0.1" with="${v.dist.file.replace(/\.wasm$/, '')}" src="…">`));
 }
 
 const cap = (c) => [c.stream_type, c.codec].filter(Boolean).join('/');

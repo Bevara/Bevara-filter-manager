@@ -15,6 +15,7 @@
  * no decoding, no Wasm, so probing a 4 GB file reads a few hundred kilobytes.
  */
 import { fromMagic, fromExtension, fromMime, extensionOf, pipelineFor, byId, VIDEO_TAIL } from './formats.js';
+import { SOLVER, SOLVER_MINIMAL } from './solvers.js';
 
 const txt = (buf, off, len) => buf.toString('latin1', off, off + len);
 const u16 = (buf, off) => buf.readUInt16BE(off);
@@ -539,7 +540,7 @@ export function sniff({ head, tail, name = '', mime = null, size = null }) {
       demux: container?.container ?? null,
       decode: [...new Set(streams.filter((s) => s.codec && !['metadata'].includes(s.type)).map((s) => s.codec))],
     },
-    using: curated.using ?? (kind === 'video' ? 'solver_1' : 'solver_minimal_1'),
+    using: curated.using ?? (kind === 'video' ? SOLVER : SOLVER_MINIMAL),
     with: withList,
     pipelineSource: assembled ? 'assembled' : 'curated',
     size,
