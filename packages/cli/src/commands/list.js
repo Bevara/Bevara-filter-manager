@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { log, color, table, formatBytes, CliError } from '../lib/ui.js';
 import { clientFor, Project } from '../lib/ctx.js';
-import { isRestricted } from '../lib/manifest.js';
+import { isRestricted, splitModule } from '../lib/manifest.js';
 
 // The patent status, yellow when users must be told.
 const patentCell = (p) => (!p?.status ? color.dim('?') : isRestricted(p) ? color.yellow(p.status) : p.status);
@@ -104,7 +104,12 @@ async function listRemote(project, opts, what) {
   const tagPkgs = all.filter((f) => f.kind === 'tags');
   // A registry older than runtime packages lists no "kind" nor "using".
   const known = all.some((f) => f.kind);
-  const published = new Set(runtimes.map((r) => `${r.name.split(':').pop()}_${r.abi ?? 1}`));
+  // The name pages give a runtime: its latest file (mm_solver_1.0.2.wasm), whose
+  // name carries the version. A filter's "using" may name an earlier one, which
+  // the registry checked was published: what is compared is the runtime itself.
+  const moduleOf = (r) => r.file?.replace(/\.wasm$/, '') ?? `${r.name.split(':').pop()}_${r.abi ?? 1}`;
+  const baseOf = (u) => (splitModule(u)?.base ?? u).toLowerCase();
+  const published = new Set(runtimes.map((r) => baseOf(moduleOf(r))));
   // A registry that lists "kind" but not "using" in /filters has it in its index.
   if (known && filters.some((f) => f.using === undefined)) {
     try {
@@ -116,7 +121,7 @@ async function listRemote(project, opts, what) {
   const runtimeCell = (f) => {
     if (!known || f.using === undefined) return color.dim('?');
     if (!f.using?.length) return color.yellow('none');
-    return f.using.map((u) => (published.has(u) ? u : color.red(u))).join(', ');
+    return f.using.map((u) => (published.has(baseOf(u)) ? u : color.red(u))).join(', ');
   };
 
   if (what === 'tags') {
@@ -136,11 +141,11 @@ async function listRemote(project, opts, what) {
     if (!known) return log.info(`${registry} predates runtime packages: it lists none`);
     if (!runtimes.length) return log.info(`no runtime published on ${registry} yet ${color.dim('(bevara publish --build in a solver directory)')}`);
     console.log(`${runtimes.length} runtime${runtimes.length === 1 ? '' : 's'} on ${color.dim(registry)}\n`);
-    const used = (r) => filters.filter((f) => f.using?.includes(`${r.name.split(':').pop()}_${r.abi ?? 1}`)).length;
+    const used = (r) => filters.filter((f) => f.using?.some((u) => baseOf(u) === baseOf(moduleOf(r)))).length;
     const rheader = ['Runtime', 'Version', 'using=', 'emsdk', 'Built-in filters', 'Used by'];
     if (opts.long) rheader.push('Size', 'Brotli', 'License', 'Downloads');
     console.log(table(runtimes.map((r) => {
-      const row = [r.deprecated ? color.yellow(r.name) : color.bold(r.name), r.latest ?? '', `${r.name.split(':').pop()}_${r.abi ?? 1}`, r.emsdk ?? color.dim('?'), (r.builtins ?? []).join(','), `${used(r)} filter${used(r) === 1 ? '' : 's'}`];
+      const row = [r.deprecated ? color.yellow(r.name) : color.bold(r.name), r.latest ?? '', moduleOf(r), r.emsdk ?? color.dim('?'), (r.builtins ?? []).join(','), `${used(r)} filter${used(r) === 1 ? '' : 's'}`];
       if (opts.long) row.push(formatBytes(r.size), formatBytes(r.brSize), r.license ?? '', String(r.downloads));
       return row;
     }), { header: rheader.map(color.bold), shrink: [4, 8] }));

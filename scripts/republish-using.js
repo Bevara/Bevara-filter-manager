@@ -2,9 +2,10 @@
 // Republishes the latest version of every accessor of a registry with its
 // "using" renamed, e.g. after the solvers became mm_solver_1.0.1 and
 // mm_solver_minimal_1.0.1. Each accessor is republished from its own published
-// tarball - same .wasm, same manifest - as the next patch version.
+// tarball - same .wasm, same manifest - as the next patch version. A name may
+// map to several (old=a+b): the accessor then links against each of them.
 //
-//   node scripts/republish-using.js --map solver_1=mm_solver_1.0.1,solver_minimal_1=mm_solver_minimal_1.0.1 \
+//   node scripts/republish-using.js --map solver_1=mm_solver_1.0.1+mm_solver_1.0.2,solver_minimal_1=mm_solver_minimal_1.0.1 \
 //        [--registry https://registry.bevara.ddns.net] [--only libpng,ogg] [--dry-run]
 // Publishes are signed with the CLI's key, as `bevara publish` does.
 import fs from 'node:fs';
@@ -19,8 +20,8 @@ const { values: o } = parseArgs({ options: {
   map: { type: 'string' }, registry: { type: 'string', default: 'https://registry.bevara.ddns.net' },
   only: { type: 'string' }, 'dry-run': { type: 'boolean' },
 } });
-if (!o.map) { console.error('usage: republish-using.js --map <old>=<new>[,<old>=<new>] [--registry <url>] [--only a,b] [--dry-run]'); process.exit(2); }
-const map = new Map(o.map.split(',').map((p) => p.split('=')));
+if (!o.map) { console.error('usage: republish-using.js --map <old>=<new>[+<new>][,<old>=<new>] [--registry <url>] [--only a,b] [--dry-run]'); process.exit(2); }
+const map = new Map(o.map.split(',').map((p) => { const [from, to] = p.split('='); return [from, to.split('+')]; }));
 const registry = o.registry.replace(/\/$/, '');
 const only = o.only ? new Set(o.only.split(',')) : null;
 const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'packages', 'cli', 'bin', 'bevara.js');
@@ -47,7 +48,7 @@ for (const entry of index.filters) {
     const manifest = JSON.parse(fs.readFileSync(path.join(pkg, 'bevara.json'), 'utf8'));
     const [a, b, c] = manifest.version.split('.').map(Number);
     manifest.version = `${a}.${b}.${c + 1}`;
-    manifest.using = [...new Set(manifest.using.map((u) => map.get(u) ?? u))];
+    manifest.using = [...new Set(manifest.using.flatMap((u) => map.get(u) ?? [u]))];
     manifest.main = doc.dist.file;
     fs.writeFileSync(path.join(pkg, 'bevara.json'), JSON.stringify(manifest, null, 2) + '\n');
     const args = [cli, 'publish', '-y', '-r', registry, ...(o['dry-run'] ? ['--dry-run'] : [])];

@@ -9,6 +9,7 @@ import { ensureKey } from './key.js';
 import { signRecord, canonicalize } from '../lib/sig.js';
 import { accessorFileName, inspectWasm } from '../lib/wasm.js';
 import { solverDir } from '../lib/solvers.js';
+import { splitModule } from '../lib/manifest.js';
 
 export const options = { build: { type: 'boolean', short: 'b' }, 'build-dir': { type: 'string', short: 'B' }, 'dry-run': { type: 'boolean' }, tag: { type: 'string' }, 'no-sign': { type: 'boolean' } };
 export const help = `Packs the filter in the current directory - its manifest (libjxl.json in the
@@ -54,7 +55,17 @@ export async function run({ args, opts }) {
     let runtimes = null;
     try { runtimes = (await client.get('/accessors/index.json', { auth: false })).runtimes ?? null; } catch { /* checked by the registry at upload */ }
     if (runtimes) {
-      const missing = using.filter((u) => !runtimes.some((r) => r.module === u));
+      // The index lists the latest release of each runtime; "using" may pin an
+      // earlier one (mm_solver_1.0.1), published if the registry has that version.
+      const published = async (u) => {
+        if (runtimes.some((r) => r.module === u)) return true;
+        const id = splitModule(u);
+        const rt = id?.version && runtimes.find((r) => splitModule(r.module)?.base === id.base);
+        if (!rt) return false;
+        try { await client.get(`/filters/${encodeURIComponent(rt.name)}/${id.version}`, { auth: false }); return true; } catch { return false; }
+      };
+      const found = await Promise.all(using.map(published));
+      const missing = using.filter((u, i) => !found[i]);
       const hint = `publish a runtime first: bevara publish --build in its directory (Editor/Interface/player/${solverDir(missing[0])}); published runtimes: ${runtimes.map((r) => r.module).join(', ') || 'none'}`;
       if (missing.length === using.length) {
         const e = new CliError(`none of the runtimes in "using" (${using.join(', ')}) is published on ${registry}`, { hint });
@@ -120,7 +131,7 @@ export async function run({ args, opts }) {
     }
     for (const w of res.warnings ?? []) if (!(project.manifestWarnings ?? []).includes(w)) log.warn(w);
     log.ok(`published ${color.bold(`${res.name}@${res.version}`)}${res.signature ? color.dim(` · signed ${res.signature.keyId} · log #${res.signature.logSeq}`) : color.yellow(' (unsigned)')}`);
-    log.info(color.dim(`  ${res.dist.wasm}\n  with="${res.dist.file.replace(/\.wasm$/, '')}"`));
+    log.info(color.dim(`  ${res.dist.wasm}\n  ${m.kind === 'runtime' ? 'using' : 'with'}="${res.dist.file.replace(/\.wasm$/, '')}"`));
   } finally {
     fs.rmSync(r.tgzPath, { force: true });
   }
