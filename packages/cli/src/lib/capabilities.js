@@ -80,6 +80,7 @@ function fits(entry, need) {
 export const fitsSolver = (entry, solver) => !entry.using?.length || entry.using.includes(solver);
 
 import { KNOWN_SOLVERS } from './solvers.js';
+import { splitModule } from './manifest.js';
 
 export { SOLVER, SOLVER_MINIMAL, KNOWN_SOLVERS, solverDir } from './solvers.js';
 
@@ -139,6 +140,15 @@ export function resolveNeeds(needs, index, { solver } = {}) {
  * registry that predates runtime packages. */
 export const publishedRuntimes = (index) => (Array.isArray(index?.runtimes) ? index.runtimes.map((r) => r.module) : null);
 
+/* Whether the registry serves runtime `m`: the index lists only the latest
+ * release of each runtime, but /accessors/ serves any release pinned by
+ * version, so mm_solver_1.0.1 is served once mm_solver_1.0.2 is published. */
+export function servesRuntime(published, m) {
+  if (published.includes(m)) return true;
+  const id = splitModule(m);
+  return !!id?.version && published.some((p) => splitModule(p)?.base === id.base);
+}
+
 /* The runtimes every list allows: the intersection of the "using" of the
  * accessors of one combination. Accessors that declare none are left out of
  * the intersection (they are reported apart). */
@@ -153,7 +163,7 @@ export function commonRuntimes(usings) {
  * runtime packages, the solvers the player ships and those accessors name. */
 export function solverOrder(index, prefer) {
   const published = publishedRuntimes(index);
-  if (published) return [...new Set([prefer, ...KNOWN_SOLVERS, ...published].filter((s) => s && published.includes(s)))];
+  if (published) return [...new Set([prefer, ...KNOWN_SOLVERS, ...published].filter((s) => s && servesRuntime(published, s)))];
   const all = [prefer, ...KNOWN_SOLVERS, ...(index?.filters ?? []).flatMap((e) => e.using ?? [])].filter(Boolean);
   return [...new Set(all)];
 }
@@ -195,7 +205,7 @@ export function resolvePipeline(needs, index, { prefer, only } = {}) {
   const chosen = free.needs.map((n) => n.chosen).filter(Boolean);
   const shared = free.missing.length ? null : commonRuntimes(chosen.map((e) => e.using));
   const published = publishedRuntimes(index);
-  const unpublished = shared?.length && published ? shared.filter((s) => !published.includes(s)) : null;
+  const unpublished = shared?.length && published ? shared.filter((s) => !servesRuntime(published, s)) : null;
   const noRuntimes = !!published && !published.length && !free.missing.length;
   return { ...free, using: prefer ?? KNOWN_SOLVERS[0], fits: [], bySolver, noRuntimes,
     conflict: unpublished?.length || noRuntimes || !conflict?.length ? null : conflict, unpublishedRuntimes: unpublished?.length ? unpublished : null,

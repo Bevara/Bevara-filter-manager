@@ -183,6 +183,15 @@ describe('a combination shares a runtime', async () => {
     assert.deepEqual(solverOrder({ runtimes: [{ module: 'solver_x_1' }] }, 'mm_solver_1.0.1'), ['solver_x_1']);
   });
 
+  test('an earlier release of a published runtime is served: the index lists only the latest', async () => {
+    const { servesRuntime } = await import('../src/lib/capabilities.js');
+    const index = { filters: [ogg(['mm_solver_1.0.1', 'mm_solver_1.0.2']), theora(['mm_solver_1.0.1', 'mm_solver_1.0.2'])], runtimes: [{ module: 'mm_solver_1.0.2' }] };
+    assert.equal(resolvePipeline(needs, index, { prefer: 'mm_solver_1.0.1' }).using, 'mm_solver_1.0.1');
+    assert.equal(resolvePipeline(needs, { ...index, filters: [ogg(['mm_solver_1.0.1']), theora(['mm_solver_1.0.1'])] }).unpublishedRuntimes, null);
+    assert.equal(servesRuntime(['mm_solver_1.0.2'], 'mm_solver_minimal_1.0.1'), false);
+    assert.equal(servesRuntime(['solver_1'], 'solver_1'), true);
+  });
+
   test('a shared runtime the registry does not publish, and no runtime at all, are said as such', () => {
     const r = resolvePipeline(needs, { filters: [ogg(['mm_solver_1.0.1']), theora(['mm_solver_1.0.1'])], runtimes: [{ module: 'mm_solver_minimal_1.0.1' }] });
     assert.deepEqual(r.unpublishedRuntimes, ['mm_solver_1.0.1']);

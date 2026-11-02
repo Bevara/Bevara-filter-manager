@@ -21,6 +21,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { scanTags, getAttr } from './html.js';
 import { isUrl } from './source.js';
+import { splitModule } from './manifest.js';
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest();
 const SCRIPT_RE = /(?:^|\/)([A-Za-z0-9][A-Za-z0-9._-]*_\d+\.js)(?:[?#].*)?$/;
@@ -90,6 +91,11 @@ export function locateSources(reqs, { index, runtimeDirs = [] }) {
         const js = rt.js === r.name;
         return { ...r, source: { url: js ? rt.jsUrl : rt.url, integrity: js ? rt.jsIntegrity : rt.integrity, label: `${rt.name}@${rt.version}` } };
       }
+      // An earlier release, pinned by version: the index lists only the latest
+      // one, but /accessors/<module>.<ext> serves any release.
+      const id = splitModule(r.name.replace(/\.(js|wasm)$/, ''));
+      const family = id?.version && index?.runtimes?.find((x) => splitModule(x.module)?.base === id.base);
+      if (family) return { ...r, source: { url: new URL(`../../${r.name}`, family.url).href, label: `${family.name}@${id.version}` } };
       return { ...r, missing: index ? `no runtime ${r.name.replace(/\.(js|wasm)$/, '')} on this registry${runtimeDirs.length ? `, nor in ${runtimeDirs.join(', ')}` : ''}` : 'the registry is unreachable' };
     }
     // A tag script: from a tags package of the registry (bevara:universal-tags, bevara:art-player).

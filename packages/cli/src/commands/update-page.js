@@ -7,7 +7,7 @@ import { sniff } from '../lib/sniff.js';
 import { readSource, isUrl } from '../lib/source.js';
 import { scanTags, getAttr, setAttributes, renameAttr, applyEdits, previewEdits } from '../lib/html.js';
 import { resolveTree, installResolved } from '../lib/resolve.js';
-import { needsOf, videoTailNeeds, resolvePipeline, pageSolver, describeNeed, publishedRuntimes } from '../lib/capabilities.js';
+import { needsOf, videoTailNeeds, resolvePipeline, pageSolver, describeNeed, publishedRuntimes, servesRuntime } from '../lib/capabilities.js';
 import { chooseTags, universalTag, sourceAttrFor } from '../lib/tag-choice.js';
 import { mediaTracks, closeMediaInfo } from '../lib/mediainfo.js';
 import { extensionOf } from '../lib/formats.js';
@@ -167,7 +167,7 @@ export async function rewritePages(args, { index, client, opts }) {
   if (only && index) {
     const published = publishedRuntimes(index);
     const local = (opts.runtime ?? []).some((d) => fs.existsSync(path.join(path.resolve(d), `${only}.js`)));
-    if (published && !published.includes(only) && !local) {
+    if (published && !servesRuntime(published, only) && !local) {
       throw new CliError(`--using ${only}: this registry publishes no such runtime`, { hint: `it publishes ${published.join(', ') || 'none'} (bevara runtimes); a solver built by hand goes in a --runtime <dir>` });
     }
   }

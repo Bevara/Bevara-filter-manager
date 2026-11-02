@@ -96,3 +96,10 @@ test('a filter must name its runtimes in "using" to be published', () => {
   assert.ok(validateManifest(f, { forPublish: true }).errors.some((e) => /"using" must list the runtimes/.test(e)));
   assert.deepEqual(validateManifest({ ...f, using: ['mm_solver_1.0.1'] }, { forPublish: true }).errors, []);
 });
+
+test('an earlier release of a runtime comes from /accessors/, which serves any release pinned by version', () => {
+  const index = { runtimes: [{ name: 'bevara:mm_solver', version: '1.0.2', module: 'mm_solver_1.0.2', file: 'mm_solver_1.0.2.wasm', url: 'https://r/accessors/bevara%3Amm_solver/1.0.2/mm_solver_1.0.2.wasm' }] };
+  const [js, minimal] = locateSources([{ kind: 'solver', name: 'mm_solver_1.0.1.js' }, { kind: 'solver', name: 'mm_solver_minimal_1.0.1.js' }], { index });
+  assert.deepEqual(js.source, { url: 'https://r/accessors/mm_solver_1.0.1.js', label: 'bevara:mm_solver@1.0.1' });
+  assert.match(minimal.missing, /no runtime mm_solver_minimal_1.0.1/);
+});

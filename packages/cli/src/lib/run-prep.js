@@ -13,7 +13,7 @@ import path from 'node:path';
 import { CliError, log } from './ui.js';
 import { readSource } from './source.js';
 import { mediaTracks } from './mediainfo.js';
-import { needsOf, resolvePipeline, describeNeed, commonRuntimes, publishedRuntimes, elementFor } from './capabilities.js';
+import { needsOf, resolvePipeline, describeNeed, commonRuntimes, publishedRuntimes, servesRuntime, elementFor } from './capabilities.js';
 import { extensionOf } from './formats.js';
 import { locateSources, deployFiles } from './page-files.js';
 import { SOLVER } from './solvers.js';
@@ -67,7 +67,7 @@ export async function fetchModules(combinations, index, { client, registry, solv
       return e;
     });
     const common = commonRuntimes(entries.map((e) => e.using)) ?? published;
-    const runtimes = (solver ? [solver] : common).filter((r) => published.includes(r));
+    const runtimes = (solver ? [solver] : common).filter((r) => servesRuntime(published, r));
     if (!runtimes.length) throw new CliError(`${modules.join(';')}: no runtime ${common.length ? `among ${common.join(', ')} ` : ''}is published on ${registry}`);
     for (const e of entries) reqs.set(e.file, { kind: 'accessor', name: e.file, dest: path.join(dir, e.file), ref: e.file, using: e.using, base: e.name.split(':').pop() });
     for (const r of runtimes) for (const ext of ['js', 'wasm']) reqs.set(`${r}.${ext}`, { kind: 'solver', name: `${r}.${ext}`, dest: path.join(dir, `${r}.${ext}`), ref: `${r}.${ext}` });
