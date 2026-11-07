@@ -9,9 +9,11 @@ import { sniff } from '../lib/sniff.js';
 import { readSource } from '../lib/source.js';
 import { mediaTracks, closeMediaInfo } from '../lib/mediainfo.js';
 import { writePackage, readPackage } from '../lib/mp4-package.js';
+import { writeBundle, readBundle, BUNDLE_SUFFIX } from '../lib/f3-package.js';
 import { rewritePages } from './update-page.js';
 
 export const options = {
+  format: { type: 'string', short: 'f' },
   output: { type: 'string', short: 'o' },
   element: { type: 'string', short: 'e' },
   attrs: { type: 'string' },
@@ -40,8 +42,18 @@ to the .mp4, with a page that installs it and opens the package.
   bevara preserve clip.ogv -o clip.mp4 --viewer
   bevara preserve clip.ogv --element video --attrs "progressive use-webcodec"
 
+Two containers are offered. "mp4" is the ISOBMFF package described above.
+"f3" stages the same pipeline for an F3 file (Zeng et al., PACMMOD 2025),
+whose Footer carries a "WASMBinaries" optional section with a lib_urls field
+for each binary: the accessors are written with the registry URL and digest a
+reader should resolve and check, and the solver is named as the entry point
+of the graph they compose. This is the payload an F3 writer serialises, not
+an F3 file - producing the container needs fff-poc. See the F3 article.
+
 Options:
-  -o, --output <file.mp4>  the package (default: <name>.bevara.mp4 here)
+  -f, --format <mp4|f3>    container (default: mp4)
+  -o, --output <file>      the package (default: <name>.bevara.mp4, or
+                           <name>.bevara.f3/ for f3)
   -e, --element <tag>      img, audio, video or canvas (default: from the media:
                            img for an image, audio for audio, canvas for video)
       --attrs "a b"        extra attributes on the element, e.g. "use-webcodec"
@@ -95,6 +107,8 @@ export async function run({ args, opts }) {
   if (!args.length) throw new CliError('usage: bevara preserve <file...>');
   if (opts.output && args.length > 1) throw new CliError('--output names one package: preserve one file at a time with it');
   if (opts.element && !ELEMENTS.has(opts.element)) throw new CliError(`--element ${opts.element}: one of ${[...ELEMENTS].join(', ')}`);
+  const format = opts.format ?? 'mp4';
+  if (!['mp4', 'f3'].includes(format)) throw new CliError(`--format ${format}: one of mp4, f3`);
   const project = Project.load({ required: false });
   const { registry, client } = clientFor(opts, project);
   const index = await client.get('/accessors/index.json', { auth: false });
@@ -103,7 +117,7 @@ export async function run({ args, opts }) {
   try {
     for (const file of args) {
       if (!fs.existsSync(file) || !fs.statSync(file).isFile()) { log.error(`${file}: not found`); process.exitCode = 1; continue; }
-      try { reports.push(await preserve(file, { opts, index, client, registry })); }
+      try { reports.push(await preserve(file, { opts, index, client, registry, format })); }
       catch (e) {
         if (!(e instanceof CliError)) throw e;
         log.error(`${file}: ${e.message}`);
@@ -116,7 +130,7 @@ export async function run({ args, opts }) {
   if (opts.json) console.log(JSON.stringify(reports, null, 2));
 }
 
-async function preserve(file, { opts, index, client, registry }) {
+async function preserve(file, { opts, index, client, registry, format }) {
   const name = path.basename(file);
   const source = await readSource(path.resolve(file));
   const info = sniff({ head: source.head, tail: source.tail, name, mime: source.mime, size: source.size });
@@ -154,20 +168,30 @@ async function preserve(file, { opts, index, client, registry }) {
       { name, path: fs.realpathSync(media), kind: 'media', type: mime },
     ].map((it, i) => ({ ...it, id: i + 1, type: it.type ?? ITEM_TYPES[path.extname(it.name)] ?? 'application/octet-stream' }));
 
-    const out = path.resolve(opts.output ?? `${name.replace(/\.[^.]+$/, '')}.bevara.mp4`);
+    const base = name.replace(/\.[^.]+$/, '');
+    const out = path.resolve(opts.output ?? (format === 'f3' ? `${base}${BUNDLE_SUFFIX}` : `${base}.bevara.mp4`));
     if (out === path.resolve(file)) throw new CliError('the package would replace the file it preserves', { hint: 'name another one with -o' });
-    const written = await writePackage(items, out, { primary: 1 });
 
-    // Read back as the service worker reads it: the page, then each item by name.
-    const check = verify(out, items);
-    if (check.ok === false) throw new CliError(`the package does not read back: ${check.problems.join('; ')}`);
-    if (!opts.json) printReport({ file, out, e, items: written.items, size: written.size, check });
-
-    let viewer = null;
-    if (opts.viewer) viewer = writeViewer(out, { quiet: opts.json });
+    let written, check, viewer = null;
+    if (format === 'f3') {
+      written = writeBundle(items, out, {
+        pipeline: e, registry,
+        media: { name, type: mime, size: source.size },
+      });
+      check = readBundle(out);
+      if (!check.ok) throw new CliError(`the bundle does not read back: ${check.problems.join('; ')}`);
+      if (!opts.json) printF3Report({ file, out, e, items: written.items, size: written.size, wasmBytes: written.wasmBytes });
+    } else {
+      written = await writePackage(items, out, { primary: 1 });
+      // Read back as the service worker reads it: the page, then each item by name.
+      check = verify(out, items);
+      if (check.ok === false) throw new CliError(`the package does not read back: ${check.problems.join('; ')}`);
+      if (!opts.json) printReport({ file, out, e, items: written.items, size: written.size, check });
+      if (opts.viewer) viewer = writeViewer(out, { quiet: opts.json });
+    }
 
     return {
-      file, package: out, size: written.size, element: e.is, using: e.using, with: e.with,
+      file, format, package: out, size: written.size, element: e.is, using: e.using, with: e.with,
       items: written.items.map(({ id, name: n, type, size, kind: k, from }) => ({ id, name: n, type, size, kind: k, from })),
       verified: check.ok, viewer, registry,
     };
@@ -201,6 +225,15 @@ function printReport({ file, out, e, items, size, check }) {
   console.log(table(rows, { header: ['#', 'Item', 'MIME', 'Size', 'From'], indent: '  ', shrink: [1, 4] }));
   const verified = check.ok ? 'read back with mp4box.js' : `not read back (${check.why})`;
   log.ok(`${path.relative(process.cwd(), out) || out}  ${formatBytes(size)}, ${items.length} items, ${verified}`);
+}
+
+function printF3Report({ file, out, e, items, size, wasmBytes }) {
+  console.log(`${color.bold(path.basename(file))}  ${color.dim(`solver="${e.using}" accessors="${e.with.join(';')}"`)}`);
+  const rows = items.map((it) => [String(it.id), it.file, it.type, formatBytes(it.size), color.dim(it.from ?? it.kind)]);
+  console.log(table(rows, { header: ['#', 'In bundle', 'MIME', 'Size', 'From'], indent: '  ', shrink: [1, 4] }));
+  console.log(color.dim(`  WASMBinaries section ${formatBytes(wasmBytes)}, lib_urls point at the registry`));
+  log.ok(`${path.relative(process.cwd(), out) || out}  ${formatBytes(size)}, ${items.length} items, digests verified`);
+  log.warn('this is the payload for an F3 Footer, not an F3 file: serialising it into OptionalMetadataSections needs fff-poc');
 }
 
 /* The service worker that opens the package, mp4box.js, and a page that
