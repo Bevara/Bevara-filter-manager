@@ -8,7 +8,7 @@ import { clientFor, Project } from '../lib/ctx.js';
 import { sniff } from '../lib/sniff.js';
 import { readSource } from '../lib/source.js';
 import { mediaTracks, closeMediaInfo } from '../lib/mediainfo.js';
-import { writePackage, readPackage } from '../lib/mp4-package.js';
+import { writePackage, readPackage, findMP4Box, remuxToTracks, addItems } from '../lib/mp4-package.js';
 import { writeBundle, readBundle, BUNDLE_SUFFIX } from '../lib/f3-package.js';
 import { rewritePages } from './update-page.js';
 
@@ -19,6 +19,7 @@ export const options = {
   attrs: { type: 'string' },
   runtime: { type: 'string', multiple: true },
   viewer: { type: 'boolean' },
+  item: { type: 'boolean' },
   keep: { type: 'boolean' },
 };
 
@@ -61,6 +62,8 @@ Options:
                            (repeatable; then the registry)
       --viewer             write the service worker and an <name>.html that opens
                            the package with it
+      --item               carry the media as an item even when GPAC could
+                           import it as a track
       --keep               keep the staging directory (the unpacked page)
       --json               machine-readable report`;
 
@@ -143,10 +146,53 @@ async function preserve(file, { opts, index, client, registry, format }) {
   // The page and the media, staged as the page will see them.
   const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-preserve-'));
   try {
-    const media = path.join(stage, name);
-    fs.symlinkSync(path.resolve(file), media);
+    const base = name.replace(/\.[^.]+$/, '');
+    const pkgName = path.basename(opts.output ?? (format === 'f3' ? `${base}${BUNDLE_SUFFIX}` : `${base}.bevara.mp4`));
+
+    /* §5.3 writes the media as a track, so the package stays a movie a native
+     * player can open. That is only possible for a file GPAC can import - a
+     * PSD or a camera raw has no track representation - so it is attempted
+     * and the item form is the fallback. In the track form the page points at
+     * the package itself: the service worker finds no item under that name
+     * and falls through to the network, which returns the movie. The pipeline
+     * is then resolved against the *remuxed* file, so the demultiplexer
+     * becomes isobmff rather than the source container's. */
+    let track = null;
+    if (format === 'mp4' && !opts.item) {
+      const gpac = findMP4Box();
+      if (gpac) {
+        const remuxed = path.join(stage, pkgName);
+        const r = remuxToTracks(gpac.bin, path.resolve(file), remuxed);
+        if (!r.tracks) log.step(`${name}: GPAC does not import it (${r.why}); carried as an item`);
+        else {
+          /* Importing is not enough: the track has to still say what it is.
+           * ISOBMFF has no registered sample entry for Theora, Dirac or Ut
+           * Video, so GPAC stores them under a generic mp4v with a private
+           * object type - which MediaInfo, and therefore the resolver, reads
+           * as MPEG-4 Visual. The package would then carry an Xvid decoder
+           * for a Theora track and would not play. So the codecs of the
+           * remuxed file are compared with the source's, and the item form
+           * is kept whenever they disagree. */
+          const after = await mediaTracks(path.resolve(remuxed), await readSource(path.resolve(remuxed)));
+          const codecs = (ts) => (ts ?? []).filter((t) => t['@type'] === 'Video' || t['@type'] === 'Audio')
+            .map((t) => `${t['@type']}:${t.Format}`).sort().join(', ');
+          const before = codecs(tracks), now = codecs(after);
+          if (before && now && before !== now) {
+            log.step(`${name}: importing it would restate ${before} as ${now}; carried as an item`);
+            fs.rmSync(remuxed, { force: true });
+          } else {
+            track = { gpac, remuxed, tracks: r.tracks };
+            log.step(`${name}: imported as ${r.tracks} track(s) by ${gpac.version}`);
+          }
+        }
+      }
+    }
+
+    const shownName = track ? pkgName : name;
+    const media = path.join(stage, shownName);
+    if (!track) fs.symlinkSync(path.resolve(file), media);
     const page = path.join(stage, 'index.html');
-    fs.writeFileSync(page, pageFor(name, element));
+    fs.writeFileSync(page, pageFor(shownName, element));
 
     log.step(`${name}: ${general?.Format ?? info.format ?? '?'} (${kind ?? '?'}) in <${element}>`);
     const { reports: [r] } = await rewritePages([page], { index, client, opts: { write: true, scripts: './', attrs: opts.attrs, runtime: opts.runtime, refresh: true } });
@@ -160,16 +206,16 @@ async function preserve(file, { opts, index, client, registry, format }) {
     // the page loads them, the media last.
     const rel = (p) => path.relative(stage, p).split(path.sep).join('/');
     const modules = (r.files ?? []).map((f) => ({ name: rel(f.dest), path: f.dest, kind: f.kind, from: f.source?.label }));
-    if (name === 'index.html' || modules.some((m) => m.name === name)) throw new CliError(`the file is named like an item of the package (${name})`, { hint: 'rename it, then preserve it' });
+    if (shownName === 'index.html' || modules.some((m) => m.name === shownName)) throw new CliError(`the file is named like an item of the package (${name})`, { hint: 'rename it, then preserve it' });
     const mime = info.mime ?? general?.InternetMediaType ?? 'application/octet-stream';
     const items = [
       { name: 'index.html', path: page, kind: 'page' },
       ...modules,
-      { name, path: fs.realpathSync(media), kind: 'media', type: mime },
+      /* in the track form the media is in the movie, not in the item list */
+      ...(track ? [] : [{ name, path: fs.realpathSync(media), kind: 'media', type: mime }]),
     ].map((it, i) => ({ ...it, id: i + 1, type: it.type ?? ITEM_TYPES[path.extname(it.name)] ?? 'application/octet-stream' }));
 
-    const base = name.replace(/\.[^.]+$/, '');
-    const out = path.resolve(opts.output ?? (format === 'f3' ? `${base}${BUNDLE_SUFFIX}` : `${base}.bevara.mp4`));
+    const out = path.resolve(opts.output ?? pkgName);
     if (out === path.resolve(file)) throw new CliError('the package would replace the file it preserves', { hint: 'name another one with -o' });
 
     let written, check, viewer = null;
@@ -182,11 +228,17 @@ async function preserve(file, { opts, index, client, registry, format }) {
       if (!check.ok) throw new CliError(`the bundle does not read back: ${check.problems.join('; ')}`);
       if (!opts.json) printF3Report({ file, out, e, items: written.items, size: written.size, wasmBytes: written.wasmBytes });
     } else {
-      written = await writePackage(items, out, { primary: 1 });
+      if (track) {
+        fs.copyFileSync(track.remuxed, out);
+        const size = addItems(track.gpac.bin, out, items, { primary: 1 });
+        written = { items: items.map((it) => ({ ...it, size: fs.statSync(it.path).size })), size };
+      } else {
+        written = await writePackage(items, out, { primary: 1 });
+      }
       // Read back as the service worker reads it: the page, then each item by name.
       check = verify(out, items);
       if (check.ok === false) throw new CliError(`the package does not read back: ${check.problems.join('; ')}`);
-      if (!opts.json) printReport({ file, out, e, items: written.items, size: written.size, check });
+      if (!opts.json) printReport({ file, out, e, items: written.items, size: written.size, check, track });
       if (opts.viewer) viewer = writeViewer(out, { quiet: opts.json });
     }
 
@@ -219,12 +271,13 @@ function verify(out, items) {
   return { ok: !problems.length, problems };
 }
 
-function printReport({ file, out, e, items, size, check }) {
+function printReport({ file, out, e, items, size, check, track }) {
   console.log(`${color.bold(path.basename(file))}  ${color.dim(`is="${e.is}" using="${e.using}" with="${e.with.join(';')}"`)}`);
   const rows = items.map((it) => [String(it.id), it.name, it.type, formatBytes(it.size), color.dim(it.kind === 'page' ? 'primary item' : it.from ?? it.kind)]);
   console.log(table(rows, { header: ['#', 'Item', 'MIME', 'Size', 'From'], indent: '  ', shrink: [1, 4] }));
   const verified = check.ok ? 'read back with mp4box.js' : `not read back (${check.why})`;
-  log.ok(`${path.relative(process.cwd(), out) || out}  ${formatBytes(size)}, ${items.length} items, ${verified}`);
+  const form = track ? `${track.tracks} track(s) + ${items.length} items` : `${items.length} items`;
+  log.ok(`${path.relative(process.cwd(), out) || out}  ${formatBytes(size)}, ${form}, ${verified}`);
 }
 
 function printF3Report({ file, out, e, items, size, wasmBytes }) {
