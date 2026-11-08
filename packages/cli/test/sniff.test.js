@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { sniff } from '../src/lib/sniff.js';
+import { SOLVER, SOLVER_MINIMAL } from '../src/lib/solvers.js';
 
 /* ------------------------------------------------- synthetic fixtures */
 const be32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
@@ -147,12 +148,12 @@ describe('sniff: pipelines', () => {
     const r = sniff({ head: Buffer.concat([oggPage('\x80theora...'), oggPage('\x01vorbis...', { serial: 2 })]), name: 'm.ogv' });
     assert.equal(r.pipelineSource, 'assembled');
     assert.deepEqual(r.with, ['ogg_1', 'theora_1', 'vorbis_1', 'isobmff_1', 'libx264_1', 'libopusenc_1']);
-    assert.equal(r.using, 'mm_solver_1.0.1');
+    assert.equal(r.using, SOLVER);
   });
 
   test('audio and image pipelines carry no encoder tail', () => {
     assert.deepEqual(sniff({ head: oggPage('\x01vorbis...'), name: 'a.ogg' }).with, ['ogg_1', 'vorbis_1']);
-    assert.equal(sniff({ head: oggPage('\x01vorbis...'), name: 'a.ogg' }).using, 'mm_solver_minimal_1.0.1');
+    assert.equal(sniff({ head: oggPage('\x01vorbis...'), name: 'a.ogg' }).using, SOLVER_MINIMAL);
   });
 
   test('requirements are exposed for registry matching', () => {

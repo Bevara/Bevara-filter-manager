@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { verdict, median, findSolver, missingModules } from '../src/lib/runner.js';
+import { SOLVER, SOLVER_MINIMAL } from '../src/lib/solvers.js';
 
 const { parseStats } = createRequire(import.meta.url)('../src/lib/run-session.cjs');
 
@@ -123,14 +124,14 @@ describe('accessor directory checks', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bevara-runner-test-'));
   test('findSolver prefers mm_solver_1.0.1 and needs both files', () => {
     assert.equal(findSolver(dir, 'video'), null);
-    fs.writeFileSync(path.join(dir, 'mm_solver_minimal_1.0.1.js'), '');
+    fs.writeFileSync(path.join(dir, SOLVER_MINIMAL + '.js'), '');
     assert.equal(findSolver(dir, 'image'), null, 'the .wasm is required too');
-    fs.writeFileSync(path.join(dir, 'mm_solver_minimal_1.0.1.wasm'), '');
-    assert.equal(findSolver(dir, 'image'), 'mm_solver_minimal_1.0.1');
-    fs.writeFileSync(path.join(dir, 'mm_solver_1.0.1.js'), '');
-    fs.writeFileSync(path.join(dir, 'mm_solver_1.0.1.wasm'), '');
-    assert.equal(findSolver(dir, 'image'), 'mm_solver_1.0.1');
-    assert.equal(findSolver(dir, 'image', 'mm_solver_minimal_1.0.1'), 'mm_solver_minimal_1.0.1');
+    fs.writeFileSync(path.join(dir, SOLVER_MINIMAL + '.wasm'), '');
+    assert.equal(findSolver(dir, 'image'), SOLVER_MINIMAL);
+    fs.writeFileSync(path.join(dir, SOLVER + '.js'), '');
+    fs.writeFileSync(path.join(dir, SOLVER + '.wasm'), '');
+    assert.equal(findSolver(dir, 'image'), SOLVER);
+    assert.equal(findSolver(dir, 'image', SOLVER_MINIMAL), SOLVER_MINIMAL);
     assert.equal(findSolver(dir, 'image', 'solver_nope'), null);
   });
 

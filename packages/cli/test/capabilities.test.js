@@ -7,6 +7,7 @@ import zlib from 'node:zlib';
 import { needsOf, videoTailNeeds, resolveNeeds, resolvePipeline, pageSolver, describeNeed, elementFor } from '../src/lib/capabilities.js';
 import { mediaTracks, closeMediaInfo } from '../src/lib/mediainfo.js';
 import { readSource } from '../src/lib/source.js';
+import { SOLVER, SOLVER_MINIMAL } from '../src/lib/solvers.js';
 
 // Index entries as /accessors/index.json serves them, from the editor's manifests.
 const entry = (module, fields = {}) => ({ name: `bevara:${module.toLowerCase()}`, version: '1.0.0', file: `${module}_1.wasm`, ...fields });
@@ -87,55 +88,55 @@ describe('capabilities', () => {
 
 describe('solvers', () => {
   const MP4 = tracks('MPEG-4', ['Audio', 'ALAC']);
-  const ISO1 = entry('isobmff', { formats: ['MPEG-4'], using: ['mm_solver_1.0.1'] });
+  const ISO1 = entry('isobmff', { formats: ['MPEG-4'], using: [SOLVER] });
   const ALAC = entry('libalac', { formats: ['ALAC'] });
 
   test('the preferred solver is kept when every accessor links against it', () => {
-    const p = resolvePipeline(needsOf(J2K, { ext: 'j2k' }), { filters: [OPENJPEG] }, { prefer: 'mm_solver_minimal_1.0.1' });
-    assert.equal(p.using, 'mm_solver_minimal_1.0.1');
-    assert.deepEqual(p.fits, ['mm_solver_minimal_1.0.1', 'mm_solver_1.0.1']);
+    const p = resolvePipeline(needsOf(J2K, { ext: 'j2k' }), { filters: [OPENJPEG] }, { prefer: SOLVER_MINIMAL });
+    assert.equal(p.using, SOLVER_MINIMAL);
+    assert.deepEqual(p.fits, [SOLVER_MINIMAL, SOLVER]);
   });
 
   test('with "only" (update-page --using), that solver or nothing', () => {
-    const forced = resolvePipeline(needsOf(J2K, { ext: 'j2k' }), { filters: [OPENJPEG] }, { prefer: 'mm_solver_minimal_1.0.1', only: 'mm_solver_1.0.1' });
-    assert.equal(forced.using, 'mm_solver_1.0.1');
-    assert.deepEqual(forced.fits, ['mm_solver_1.0.1']);
+    const forced = resolvePipeline(needsOf(J2K, { ext: 'j2k' }), { filters: [OPENJPEG] }, { prefer: SOLVER_MINIMAL, only: SOLVER });
+    assert.equal(forced.using, SOLVER);
+    assert.deepEqual(forced.fits, [SOLVER]);
     // isobmff links against mm_solver_1.0.1 only: under mm_solver_minimal_1.0.1 the container is missing.
-    const refused = resolvePipeline(needsOf(MP4, { ext: 'm4a' }), { filters: [ISO1, ALAC] }, { only: 'mm_solver_minimal_1.0.1' });
-    assert.equal(refused.using, 'mm_solver_minimal_1.0.1');
+    const refused = resolvePipeline(needsOf(MP4, { ext: 'm4a' }), { filters: [ISO1, ALAC] }, { only: SOLVER_MINIMAL });
+    assert.equal(refused.using, SOLVER_MINIMAL);
     assert.ok(refused.missing.length);
     assert.deepEqual(refused.fits, []);
   });
 
   test('an accessor\'s "using" imposes the solver', () => {
-    const p = resolvePipeline(needsOf(MP4, { ext: 'm4a' }), { filters: [ISO1, ALAC] }, { prefer: 'mm_solver_minimal_1.0.1' });
-    assert.equal(p.using, 'mm_solver_1.0.1');
+    const p = resolvePipeline(needsOf(MP4, { ext: 'm4a' }), { filters: [ISO1, ALAC] }, { prefer: SOLVER_MINIMAL });
+    assert.equal(p.using, SOLVER);
     assert.deepEqual(p.with, ['isobmff_1', 'libalac_1']);
     assert.equal(p.conflict, null);
   });
 
   test('a candidate that does not link against the solver is passed over', () => {
-    const minimalOnly = entry('alacmin', { formats: ['ALAC'], using: ['mm_solver_minimal_1.0.1'], priority: 1 });
-    const p = resolvePipeline(needsOf(MP4, { ext: 'm4a' }), { filters: [ISO1, ALAC, minimalOnly] }, { prefer: 'mm_solver_minimal_1.0.1' });
-    assert.equal(p.using, 'mm_solver_1.0.1');
+    const minimalOnly = entry('alacmin', { formats: ['ALAC'], using: [SOLVER_MINIMAL], priority: 1 });
+    const p = resolvePipeline(needsOf(MP4, { ext: 'm4a' }), { filters: [ISO1, ALAC, minimalOnly] }, { prefer: SOLVER_MINIMAL });
+    assert.equal(p.using, SOLVER);
     assert.deepEqual(p.with, ['isobmff_1', 'libalac_1']);
   });
 
   test('accessors that need different solvers are a conflict, not a missing need', () => {
-    const tta = entry('libtta', { formats: ['ALAC'], using: ['mm_solver_minimal_1.0.1'] });
-    const p = resolvePipeline(needsOf(MP4, { ext: 'm4a' }), { filters: [ISO1, tta] }, { prefer: 'mm_solver_minimal_1.0.1' });
+    const tta = entry('libtta', { formats: ['ALAC'], using: [SOLVER_MINIMAL] });
+    const p = resolvePipeline(needsOf(MP4, { ext: 'm4a' }), { filters: [ISO1, tta] }, { prefer: SOLVER_MINIMAL });
     assert.deepEqual(p.missing, []);
     assert.deepEqual(p.fits, []);
-    assert.deepEqual(p.conflict, [{ module: 'isobmff_1', using: ['mm_solver_1.0.1'] }, { module: 'libtta_1', using: ['mm_solver_minimal_1.0.1'] }]);
+    assert.deepEqual(p.conflict, [{ module: 'isobmff_1', using: [SOLVER] }, { module: 'libtta_1', using: [SOLVER_MINIMAL] }]);
   });
 
   test('a page gets one solver that fits every element, and keeps the one it has', () => {
-    const img = resolvePipeline(needsOf(J2K, { ext: 'j2k' }), { filters: [OPENJPEG] }, { prefer: 'mm_solver_minimal_1.0.1' });
-    const m4a = resolvePipeline(needsOf(MP4, { ext: 'm4a' }), { filters: [ISO1, ALAC] }, { prefer: 'mm_solver_minimal_1.0.1' });
-    assert.equal(pageSolver([img]), 'mm_solver_minimal_1.0.1');
-    assert.equal(pageSolver([img, m4a]), 'mm_solver_1.0.1');
-    assert.equal(pageSolver([img], ['mm_solver_1.0.1']), 'mm_solver_1.0.1');
-    assert.equal(pageSolver([m4a], ['mm_solver_minimal_1.0.1']), null);
+    const img = resolvePipeline(needsOf(J2K, { ext: 'j2k' }), { filters: [OPENJPEG] }, { prefer: SOLVER_MINIMAL });
+    const m4a = resolvePipeline(needsOf(MP4, { ext: 'm4a' }), { filters: [ISO1, ALAC] }, { prefer: SOLVER_MINIMAL });
+    assert.equal(pageSolver([img]), SOLVER_MINIMAL);
+    assert.equal(pageSolver([img, m4a]), SOLVER);
+    assert.equal(pageSolver([img], [SOLVER]), SOLVER);
+    assert.equal(pageSolver([m4a], [SOLVER_MINIMAL]), null);
   });
 });
 
@@ -176,43 +177,43 @@ describe('a combination shares a runtime', async () => {
   const theora = (using) => ({ name: 'bevara:theora', file: 'theora_1.wasm', formats: ['Theora'], using });
 
   test('the solver is a runtime the registry publishes, common to every accessor', () => {
-    const index = { filters: [ogg(['mm_solver_minimal_1.0.1', 'mm_solver_1.0.1']), theora(['mm_solver_1.0.1'])], runtimes: [{ module: 'mm_solver_1.0.1' }, { module: 'mm_solver_minimal_1.0.1' }] };
+    const index = { filters: [ogg([SOLVER_MINIMAL, SOLVER]), theora([SOLVER])], runtimes: [{ module: SOLVER }, { module: SOLVER_MINIMAL }] };
     const r = resolvePipeline(needs, index);
-    assert.equal(r.using, 'mm_solver_1.0.1');
-    assert.deepEqual(r.fits, ['mm_solver_1.0.1']);
-    assert.deepEqual(solverOrder({ runtimes: [{ module: 'solver_x_1' }] }, 'mm_solver_1.0.1'), ['solver_x_1']);
+    assert.equal(r.using, SOLVER);
+    assert.deepEqual(r.fits, [SOLVER]);
+    assert.deepEqual(solverOrder({ runtimes: [{ module: 'solver_x_1' }] }, SOLVER), ['solver_x_1']);
   });
 
   test('an earlier release of a published runtime is served: the index lists only the latest', async () => {
     const { servesRuntime } = await import('../src/lib/capabilities.js');
-    const index = { filters: [ogg(['mm_solver_1.0.1', 'mm_solver_1.0.2']), theora(['mm_solver_1.0.1', 'mm_solver_1.0.2'])], runtimes: [{ module: 'mm_solver_1.0.2' }] };
-    assert.equal(resolvePipeline(needs, index, { prefer: 'mm_solver_1.0.1' }).using, 'mm_solver_1.0.1');
-    assert.equal(resolvePipeline(needs, { ...index, filters: [ogg(['mm_solver_1.0.1']), theora(['mm_solver_1.0.1'])] }).unpublishedRuntimes, null);
-    assert.equal(servesRuntime(['mm_solver_1.0.2'], 'mm_solver_minimal_1.0.1'), false);
+    const index = { filters: [ogg([SOLVER, 'mm_solver_1.0.2']), theora([SOLVER, 'mm_solver_1.0.2'])], runtimes: [{ module: 'mm_solver_1.0.2' }] };
+    assert.equal(resolvePipeline(needs, index, { prefer: SOLVER }).using, SOLVER);
+    assert.equal(resolvePipeline(needs, { ...index, filters: [ogg([SOLVER]), theora([SOLVER])] }).unpublishedRuntimes, null);
+    assert.equal(servesRuntime(['mm_solver_1.0.2'], SOLVER_MINIMAL), false);
     assert.equal(servesRuntime(['solver_1'], 'solver_1'), true);
   });
 
   test('a shared runtime the registry does not publish, and no runtime at all, are said as such', () => {
-    const r = resolvePipeline(needs, { filters: [ogg(['mm_solver_1.0.1']), theora(['mm_solver_1.0.1'])], runtimes: [{ module: 'mm_solver_minimal_1.0.1' }] });
-    assert.deepEqual(r.unpublishedRuntimes, ['mm_solver_1.0.1']);
+    const r = resolvePipeline(needs, { filters: [ogg([SOLVER]), theora([SOLVER])], runtimes: [{ module: SOLVER_MINIMAL }] });
+    assert.deepEqual(r.unpublishedRuntimes, [SOLVER]);
     assert.equal(r.conflict, null);
     const none = resolvePipeline(needs, { filters: [ogg(undefined), theora(undefined)], runtimes: [] });
     assert.equal(none.noRuntimes, true);
     assert.equal(none.conflict, null);
     assert.deepEqual(none.undeclared, ['ogg_1', 'theora_1']);
-    const clash = resolvePipeline(needs, { filters: [ogg(['mm_solver_minimal_1.0.1']), theora(['mm_solver_1.0.1'])], runtimes: [{ module: 'mm_solver_1.0.1' }, { module: 'mm_solver_minimal_1.0.1' }] });
+    const clash = resolvePipeline(needs, { filters: [ogg([SOLVER_MINIMAL]), theora([SOLVER])], runtimes: [{ module: SOLVER }, { module: SOLVER_MINIMAL }] });
     assert.ok(clash.conflict?.length);
     assert.deepEqual(commonRuntimes([['a_1', 'b_1'], null, ['b_1']]), ['b_1']);
   });
 
   test('test and bench run a combination with a runtime its installed accessors share, or refuse it', () => {
     const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), 'bevara-rt-'));
-    for (const f of ['mm_solver_1.0.1.js', 'mm_solver_1.0.1.wasm', 'mm_solver_minimal_1.0.1.js', 'mm_solver_minimal_1.0.1.wasm', 'ogg_1.wasm', 'theora_1.wasm']) fsm.writeFileSync(pathm.join(dir, f), '');
-    fsm.writeFileSync(pathm.join(dir, 'ogg.json'), JSON.stringify({ using: ['mm_solver_minimal_1.0.1'] }));
-    fsm.writeFileSync(pathm.join(dir, 'theora.json'), JSON.stringify({ using: ['mm_solver_minimal_1.0.1', 'mm_solver_1.0.1'] }));
-    assert.equal(solverForCombination(dir, 'video', undefined, ['ogg_1', 'theora_1']).solver, 'mm_solver_minimal_1.0.1');
-    assert.throws(() => solverForCombination(dir, 'video', 'mm_solver_1.0.1', ['ogg_1', 'theora_1']), /link against mm_solver_minimal_1.0.1/);
-    fsm.writeFileSync(pathm.join(dir, 'theora.json'), JSON.stringify({ using: ['mm_solver_1.0.1'] }));
+    for (const f of [SOLVER + '.js', SOLVER + '.wasm', SOLVER_MINIMAL + '.js', SOLVER_MINIMAL + '.wasm', 'ogg_1.wasm', 'theora_1.wasm']) fsm.writeFileSync(pathm.join(dir, f), '');
+    fsm.writeFileSync(pathm.join(dir, 'ogg.json'), JSON.stringify({ using: [SOLVER_MINIMAL] }));
+    fsm.writeFileSync(pathm.join(dir, 'theora.json'), JSON.stringify({ using: [SOLVER_MINIMAL, SOLVER] }));
+    assert.equal(solverForCombination(dir, 'video', undefined, ['ogg_1', 'theora_1']).solver, SOLVER_MINIMAL);
+    assert.throws(() => solverForCombination(dir, 'video', SOLVER, ['ogg_1', 'theora_1']), /link against mm_solver_minimal_1.0.1/);
+    fsm.writeFileSync(pathm.join(dir, 'theora.json'), JSON.stringify({ using: [SOLVER] }));
     assert.throws(() => solverForCombination(dir, 'video', undefined, ['ogg_1', 'theora_1']), /no runtime common/);
     assert.deepEqual(combinationRuntimes(dir, ['ogg_1', 'x_1']).undeclared, ['x_1']);
     fsm.rmSync(dir, { recursive: true, force: true });
@@ -223,23 +224,23 @@ describe('matching prefers a declared format to a matching extension', async () 
   const { needsOf, resolvePipeline } = await import('../src/lib/capabilities.js');
   const index = {
     filters: [
-      { name: 'bevara:ogg', file: 'ogg_1.wasm', formats: ['Ogg'], extension: { ogg: 'audio' }, using: ['mm_solver_minimal_1.0.1'] },
-      { name: 'bevara:libopus', file: 'libopus_1.wasm', formats: ['opus'], extension: { opus: 'audio' }, using: ['mm_solver_minimal_1.0.1', 'mm_solver_1.0.1'] },
-      { name: 'bevara:libxmp', file: 'libxmp_1.wasm', formats: ['mod', 'xm'], extension: { mod: 'audio', xm: 'audio' }, using: ['mm_solver_1.0.1'] },
+      { name: 'bevara:ogg', file: 'ogg_1.wasm', formats: ['Ogg'], extension: { ogg: 'audio' }, using: [SOLVER_MINIMAL] },
+      { name: 'bevara:libopus', file: 'libopus_1.wasm', formats: ['opus'], extension: { opus: 'audio' }, using: [SOLVER_MINIMAL, SOLVER] },
+      { name: 'bevara:libxmp', file: 'libxmp_1.wasm', formats: ['mod', 'xm'], extension: { mod: 'audio', xm: 'audio' }, using: [SOLVER] },
     ],
-    runtimes: [{ module: 'mm_solver_1.0.1' }, { module: 'mm_solver_minimal_1.0.1' }],
+    runtimes: [{ module: SOLVER }, { module: SOLVER_MINIMAL }],
   };
 
   test('an Ogg Opus file gets the Ogg demultiplexer, under the solver that has it', () => {
     const needs = needsOf([{ '@type': 'General', Format: 'Ogg' }, { '@type': 'Audio', Format: 'Opus' }], { ext: 'opus' });
-    const r = resolvePipeline(needs, index, { prefer: 'mm_solver_1.0.1' });
+    const r = resolvePipeline(needs, index, { prefer: SOLVER });
     assert.deepEqual(r.with, ['ogg_1', 'libopus_1']);
-    assert.equal(r.using, 'mm_solver_minimal_1.0.1');
+    assert.equal(r.using, SOLVER_MINIMAL);
   });
 
   test('a stream MediaInfo does not name falls back on the file extension', () => {
     const needs = needsOf([{ '@type': 'General', Format: 'Module' }, { '@type': 'Audio' }], { ext: 'mod' });
-    const r = resolvePipeline(needs, index, { prefer: 'mm_solver_1.0.1' });
+    const r = resolvePipeline(needs, index, { prefer: SOLVER });
     assert.deepEqual(r.missing, []);
     assert.deepEqual(r.with, ['libxmp_1']);
   });
@@ -250,12 +251,12 @@ describe('the priority of the filter doing the work', async () => {
   const raw = [{ property: 'GF_PROP_PID_CODECID', format: 'GF_CODECID_RAW' }];
   const index = {
     filters: [
-      { name: 'bevara:ffmpeg-flac', file: 'ffmpeg-flac_1.wasm', formats: ['FLAC'], priority: 0, using: ['mm_solver_1.0.1'], caps: [
+      { name: 'bevara:ffmpeg-flac', file: 'ffmpeg-flac_1.wasm', formats: ['FLAC'], priority: 0, using: [SOLVER], caps: [
         { filter: 'ffdec', priority: 128, bundles: [{ inputs: [], outputs: raw }] },
         { filter: 'rfflac', priority: 0, bundles: [{ inputs: [{ property: 'GF_PROP_PID_STREAM_TYPE', format: 'GF_STREAM_FILE' }], outputs: [] }] }] },
-      { name: 'bevara:libflac', file: 'libflac_1.wasm', formats: ['flac'], priority: 0, using: ['mm_solver_1.0.1'], caps: [{ filter: 'flacdec', priority: 0, bundles: [{ inputs: [], outputs: raw }] }] },
+      { name: 'bevara:libflac', file: 'libflac_1.wasm', formats: ['flac'], priority: 0, using: [SOLVER], caps: [{ filter: 'flacdec', priority: 0, bundles: [{ inputs: [], outputs: raw }] }] },
     ],
-    runtimes: [{ module: 'mm_solver_1.0.1' }],
+    runtimes: [{ module: SOLVER }],
   };
   test('a native decoder at 0 comes before ffmpeg at 128, whatever their reframers', () => {
     const needs = needsOf([{ '@type': 'General', Format: 'FLAC' }, { '@type': 'Audio', Format: 'FLAC' }], { ext: 'flac' });
@@ -269,15 +270,15 @@ describe('an image file is read and decoded by one accessor', async () => {
   const decoder = (filter) => [{ filter, priority: 0, bundles: [{ inputs: [], outputs: raw }] }];
   const index = {
     filters: [
-      { name: 'bevara:libtiff', file: 'libtiff_1.wasm', formats: ['tif', 'tiff'], extension: { tif: 'img', tiff: 'img' }, using: ['mm_solver_1.0.1'], caps: decoder('tiffdec') },
-      { name: 'bevara:qdbmp', file: 'qdbmp_1.wasm', formats: ['Bitmap'], extension: { bmp: 'img' }, using: ['mm_solver_1.0.1'], caps: decoder('QDBMP') },
-      { name: 'bevara:libraw', file: 'libraw_1.wasm', formats: ['raw', 'dng'], extension: { raw: 'img', dng: 'img' }, using: ['mm_solver_1.0.1'], caps: decoder('rawdec') },
-      { name: 'bevara:libjpeg', file: 'libjpeg_1.wasm', formats: ['JPEG'], using: ['mm_solver_1.0.1'], caps: decoder('jpegdec') },
-      { name: 'bevara:isobmff', file: 'isobmff_1.wasm', formats: ['MPEG-4'], extension: { mp4: 'video' }, using: ['mm_solver_1.0.1'], caps: [{ filter: 'mp4dmx', priority: 0, bundles: [{ inputs: [], outputs: [] }] }] },
-      { name: 'bevara:libutvideo', file: 'libutvideo_1.wasm', formats: ['ULY0', 'ULY2'], using: ['mm_solver_1.0.1'], caps: decoder('utvideodec') },
-      { name: 'bevara:avidmx', file: 'avidmx_1.wasm', formats: ['AVI'], using: ['mm_solver_1.0.1'] },
+      { name: 'bevara:libtiff', file: 'libtiff_1.wasm', formats: ['tif', 'tiff'], extension: { tif: 'img', tiff: 'img' }, using: [SOLVER], caps: decoder('tiffdec') },
+      { name: 'bevara:qdbmp', file: 'qdbmp_1.wasm', formats: ['Bitmap'], extension: { bmp: 'img' }, using: [SOLVER], caps: decoder('QDBMP') },
+      { name: 'bevara:libraw', file: 'libraw_1.wasm', formats: ['raw', 'dng'], extension: { raw: 'img', dng: 'img' }, using: [SOLVER], caps: decoder('rawdec') },
+      { name: 'bevara:libjpeg', file: 'libjpeg_1.wasm', formats: ['JPEG'], using: [SOLVER], caps: decoder('jpegdec') },
+      { name: 'bevara:isobmff', file: 'isobmff_1.wasm', formats: ['MPEG-4'], extension: { mp4: 'video' }, using: [SOLVER], caps: [{ filter: 'mp4dmx', priority: 0, bundles: [{ inputs: [], outputs: [] }] }] },
+      { name: 'bevara:libutvideo', file: 'libutvideo_1.wasm', formats: ['ULY0', 'ULY2'], using: [SOLVER], caps: decoder('utvideodec') },
+      { name: 'bevara:avidmx', file: 'avidmx_1.wasm', formats: ['AVI'], using: [SOLVER] },
     ],
-    runtimes: [{ module: 'mm_solver_1.0.1' }],
+    runtimes: [{ module: SOLVER }],
   };
   const pipe = (general, streams, ext) => resolvePipeline(needsOf([{ '@type': 'General', Format: general }, ...streams], { ext }), index);
 
